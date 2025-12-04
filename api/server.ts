@@ -13,6 +13,7 @@ const ROOT_DIR = process.cwd();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IS_VERCEL = !!process.env.VERCEL;
 
 // Middleware
 app.use(cors());
@@ -46,7 +47,6 @@ const upload = multer({ storage });
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-const IS_VERCEL = !!process.env.VERCEL;
 const FORCE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === '1' || String(process.env.USE_SQLITE || '').toLowerCase() === 'true';
 const useSupabase = !!supabase && !FORCE_SQLITE;
 
