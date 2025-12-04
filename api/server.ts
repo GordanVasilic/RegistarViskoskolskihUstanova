@@ -4,6 +4,7 @@ let Database: any = null;
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
  
@@ -18,19 +19,15 @@ app.use(cors());
 app.use(express.json());
 
 // Create uploads directory (for logos and temporary files)
-const uploadsDir = path.join(ROOT_DIR, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const uploadsDir = IS_VERCEL ? os.tmpdir() : path.join(ROOT_DIR, 'uploads');
+try { if (!fs.existsSync(uploadsDir)) { fs.mkdirSync(uploadsDir, { recursive: true }); } } catch {}
 
 // Serve uploaded files (logos)
-app.use('/uploads', express.static(uploadsDir));
+if (!IS_VERCEL) app.use('/uploads', express.static(uploadsDir));
 
 // DMS storage root for documents
-const storageRoot = path.join(ROOT_DIR, 'storage/app/files');
-if (!fs.existsSync(storageRoot)) {
-  fs.mkdirSync(storageRoot, { recursive: true });
-}
+const storageRoot = IS_VERCEL ? path.join(os.tmpdir(), 'app_files') : path.join(ROOT_DIR, 'storage/app/files');
+try { if (!fs.existsSync(storageRoot)) { fs.mkdirSync(storageRoot, { recursive: true }); } } catch {}
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
