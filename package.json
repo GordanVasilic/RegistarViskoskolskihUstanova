@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"vite\"",
-    "dev:api": "tsx api/server.ts",
+    "dev:api": "tsx api/devServer.ts",
     "export:sql": "tsx api/exportSql.ts",
     "import:url": "tsx api/importFromUrl.ts",
     "import:file": "tsx api/importFromFile.ts",
