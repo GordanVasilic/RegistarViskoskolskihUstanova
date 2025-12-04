@@ -521,8 +521,12 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.get('/api/auth/me', (req, res) => {
-  // Mock authentication - in real app, use JWT
-  res.json({ user: null });
+  const uid = String(req.headers['x-user-id'] || '').trim();
+  const role = String(req.headers['x-user-role'] || '').trim();
+  if (uid && role) {
+    return res.json({ user: { id: uid, email: '', full_name: '', role, is_active: true, created_at: new Date().toISOString() } });
+  }
+  return res.json({ user: null });
 });
 
 // Institutions
@@ -1645,28 +1649,3 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 export default app;
-  console.log(`Database initialized with sample data`);
-});
-
-export default app;
-// Migrations: add columns to documents if missing
-ensureColumn('documents', 'institution_id', 'TEXT');
-ensureColumn('documents', 'program_id', 'TEXT');
-ensureColumn('documents', 'title', 'TEXT');
-ensureColumn('documents', 'description', 'TEXT');
-ensureColumn('documents', 'issuer', 'TEXT');
-ensureColumn('documents', 'issued_at', 'DATE');
-ensureColumn('documents', 'number', 'TEXT');
-ensureColumn('documents', 'sha256', 'TEXT');
-ensureColumn('documents', 'version', 'INTEGER DEFAULT 1');
-ensureColumn('documents', 'is_confidential', 'BOOLEAN DEFAULT 0');
-ensureColumn('documents', 'tags', 'TEXT');
-// Auth (demo)
-app.get('/api/auth/me', (req, res) => {
-  const uid = String(req.headers['x-user-id'] || '').trim();
-  const role = String(req.headers['x-user-role'] || '').trim();
-  if (uid && role) {
-    return res.json({ user: { id: uid, email: '', full_name: '', role, is_active: true, created_at: new Date().toISOString() } });
-  }
-  return res.json({ user: null });
-});
