@@ -47,224 +47,27 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 const IS_VERCEL = !!process.env.VERCEL;
-const useSupabase = !!supabase;
+const FORCE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === '1' || String(process.env.USE_SQLITE || '').toLowerCase() === 'true';
+const useSupabase = !!supabase && !FORCE_SQLITE;
 
-// Initialize SQLite database (disabled on Vercel)
-const db = IS_VERCEL ? null : (Database || (Database = require('better-sqlite3')) , new Database('registry.db'));
+const db = null;
 
 // Create tables
-if (db) db.exec(`
-  CREATE TABLE IF NOT EXISTS institutions (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    address TEXT NOT NULL,
-    city TEXT NOT NULL,
-    phone TEXT,
-    email TEXT NOT NULL,
-    website TEXT,
-    institution_type TEXT NOT NULL CHECK (institution_type IN ('university', 'college', 'academy')),
-    accreditation_status TEXT DEFAULT 'pending' CHECK (accreditation_status IN ('pending', 'accredited', 'expired', 'suspended')),
-    logo_url TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS study_programs (
-    id TEXT PRIMARY KEY,
-    institution_id TEXT REFERENCES institutions(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    degree_level TEXT NOT NULL CHECK (degree_level IN ('bachelor', 'master', 'phd', 'professional')),
-    duration_years INTEGER NOT NULL CHECK (duration_years > 0 AND duration_years <= 6),
-    ects_credits INTEGER,
-    accreditation_status TEXT DEFAULT 'pending',
-    accreditation_expiry DATE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS accreditation_processes (
-    id TEXT PRIMARY KEY,
-    institution_id TEXT REFERENCES institutions(id) ON DELETE CASCADE,
-    assigned_officer_id TEXT,
-    process_type TEXT NOT NULL CHECK (process_type IN ('initial', 'renewal', 're-evaluation')),
-    status TEXT NOT NULL CHECK (status IN ('submitted', 'under_review', 'approved', 'rejected', 'appeal')),
-    application_date DATE NOT NULL,
-    decision_date DATE,
-    decision TEXT,
-    notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS documents (
-    id TEXT PRIMARY KEY,
-    institution_id TEXT REFERENCES institutions(id) ON DELETE CASCADE,
-    program_id TEXT REFERENCES study_programs(id) ON DELETE CASCADE,
-    process_id TEXT REFERENCES accreditation_processes(id) ON DELETE CASCADE,
-    document_type TEXT NOT NULL,
-    title TEXT,
-    description TEXT,
-    issuer TEXT,
-    issued_at DATE,
-    number TEXT,
-    file_name TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size INTEGER,
-    mime_type TEXT,
-    sha256 TEXT,
-    version INTEGER DEFAULT 1,
-    is_confidential BOOLEAN DEFAULT 0,
-    tags TEXT,
-    uploaded_by TEXT,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    full_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'operator', 'viewer', 'institution')),
-    is_active BOOLEAN DEFAULT 1,
-    institution_id TEXT REFERENCES institutions(id),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id TEXT PRIMARY KEY,
-    actor_id TEXT,
-    actor_role TEXT,
-    actor_name TEXT,
-    action TEXT,
-    resource_type TEXT,
-    resource_id TEXT,
-    changed_fields TEXT,
-    prev_values TEXT,
-    new_values TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+ 
 
 // Migrations: add columns to institutions if missing
-function ensureColumn(table: string, column: string, typeClause: string) {
-  if (!db) return;
-  const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  const exists = info.some(c => c.name === column);
-  if (!exists) {
-    try {
-      db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeClause}`).run();
-    } catch { /* ignore */ }
-  }
-}
-
-ensureColumn('institutions', 'ownership_type', 'TEXT');
-ensureColumn('institutions', 'founded_on', 'DATE');
-ensureColumn('institutions', 'accreditation_valid_from', 'DATE');
-ensureColumn('institutions', 'accreditation_valid_to', 'DATE');
-ensureColumn('institutions', 'competent_authority', 'TEXT');
-ensureColumn('institutions', 'notes', 'TEXT');
-ensureColumn('accreditation_processes', 'program_id', 'TEXT');
-ensureColumn('institutions', 'registration_number', 'TEXT');
-ensureColumn('institutions', 'tax_id', 'TEXT');
-ensureColumn('institutions', 'short_name', 'TEXT');
-ensureColumn('institutions', 'municipality', 'TEXT');
-ensureColumn('institutions', 'postal_code', 'TEXT');
-ensureColumn('institutions', 'country', "TEXT DEFAULT 'Bosna i Hercegovina'");
-ensureColumn('institutions', 'founder_name', 'TEXT');
-ensureColumn('institutions', 'founding_act_reference', 'TEXT');
-ensureColumn('institutions', 'head_name', 'TEXT');
-ensureColumn('institutions', 'head_title', 'TEXT');
-ensureColumn('institutions', 'fax', 'TEXT');
-ensureColumn('institutions', 'is_active', 'BOOLEAN DEFAULT 1');
+ 
 
 // Migrate old user roles
-if (db) {
-  try {
-    const roles = db.prepare(`SELECT DISTINCT role FROM users`).all() as Array<{ role: string }>;
-    const hasOldRole = roles.some(r => r.role === 'officer');
-    if (hasOldRole) {
-      db.prepare(`UPDATE users SET role = 'operator' WHERE role = 'officer'`).run();
-    }
-  } catch {}
-}
+ 
 
 // Rebuild users table to ensure updated CHECK constraint
-if (db) {
-try {
-  db.prepare('BEGIN').run();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users_new (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      full_name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('admin', 'operator', 'viewer', 'institution')),
-      is_active BOOLEAN DEFAULT 1,
-      institution_id TEXT REFERENCES institutions(id),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  const rows = db.prepare('SELECT id, email, password, full_name, role, is_active, institution_id, created_at FROM users').all() as any[];
-  const insert = db.prepare('INSERT INTO users_new (id, email, password, full_name, role, is_active, institution_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const r of rows) {
-    const newRole = r.role === 'officer' ? 'operator' : r.role;
-    insert.run(r.id, r.email, r.password, r.full_name, newRole, r.is_active, r.institution_id, r.created_at);
-  }
-  db.prepare('DROP TABLE users').run();
-  db.prepare('ALTER TABLE users_new RENAME TO users').run();
-  db.prepare('COMMIT').run();
-} catch (e) {
-  try { db.prepare('ROLLBACK').run(); } catch {}
-}
-}
+ 
 
-if (db) {
-try {
-  db.prepare('BEGIN').run();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS audit_logs_new (
-      id TEXT PRIMARY KEY,
-      actor_id TEXT,
-      actor_role TEXT,
-      actor_name TEXT,
-      action TEXT,
-      resource_type TEXT,
-      resource_id TEXT,
-      changed_fields TEXT,
-      prev_values TEXT,
-      new_values TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_logs'").get() as any;
-  if (exists?.name) {
-    const oldLogs = db.prepare('SELECT id, actor_id, actor_role, action, resource_type, resource_id, changes, created_at FROM audit_logs').all() as any[];
-    const ins = db.prepare('INSERT INTO audit_logs_new (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const l of oldLogs) {
-      ins.run(l.id, l.actor_id || null, l.actor_role || null, null, l.action || null, l.resource_type || null, l.resource_id || null, null, null, l.changes || null, l.created_at || null);
-    }
-    db.prepare('DROP TABLE audit_logs').run();
-  }
-  db.prepare('ALTER TABLE audit_logs_new RENAME TO audit_logs').run();
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS audit_logs_no_update BEFORE UPDATE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Audit logs are immutable'); END;
-    CREATE TRIGGER IF NOT EXISTS audit_logs_no_delete BEFORE DELETE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Audit logs are immutable'); END;
-  `);
-  db.prepare('COMMIT').run();
-} catch (e) {
-  try { db.prepare('ROLLBACK').run(); } catch {}
-}
-}
+ 
 
 function actorNameById(id?: string) {
-  if (!id) return null;
-  try {
-    if (db) {
-      const u = db.prepare('SELECT full_name FROM users WHERE id = ?').get(id) as any;
-      return u?.full_name || null;
-    }
-    return null;
-  } catch { return null; }
+  return null;
 }
 
 function diffObject(prev: any, next: any, fields?: string[]) {
@@ -285,232 +88,26 @@ function diffObject(prev: any, next: any, fields?: string[]) {
 }
 
 // Insert sample data
-const sampleData = db ? (db.prepare('SELECT COUNT(*) as count FROM institutions').get() as { count: number }) : { count: 0 };
-if (db) {
-  const institutions = [
-    {
-      id: 'inst-001',
-      name: 'Univerzitet u Sarajevu',
-      address: 'Obala Kulina bana 7/II',
-      city: 'Sarajevo',
-      phone: '+387 33 668 500',
-      email: 'info@unsa.ba',
-      website: 'https://www.unsa.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/unsa.svg'
-    },
-    {
-      id: 'inst-002',
-      name: 'Univerzitet u Tuzli',
-      address: 'Univerzitetska 4',
-      city: 'Tuzla',
-      phone: '+387 35 320 800',
-      email: 'info@untz.ba',
-      website: 'https://www.untz.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/untz.svg'
-    },
-    {
-      id: 'inst-003',
-      name: 'Univerzitet u Mostaru',
-      address: 'Matice hrvatske bb',
-      city: 'Mostar',
-      phone: '+387 36 350 800',
-      email: 'info@unmo.ba',
-      website: 'https://www.unmo.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/unmo.svg'
-    },
-    {
-      id: 'inst-004',
-      name: 'Internacionalni Univerzitet Burch',
-      address: 'Ilidža 1',
-      city: 'Sarajevo',
-      phone: '+387 33 957 000',
-      email: 'info@ibu.edu.ba',
-      website: 'https://www.ibu.edu.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/burch.svg'
-    },
-    {
-      id: 'inst-005',
-      name: 'Univerzitet u Banjoj Luci',
-      address: 'Bulevar vojvode Petra Bojovića 1A',
-      city: 'Banja Luka',
-      phone: '+387 51 321 000',
-      email: 'info@unibl.org',
-      website: 'https://www.unibl.org',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/unibl.svg'
-    },
-    {
-      id: 'inst-006',
-      name: 'Univerzitet u Zenici',
-      address: 'Fakultetska 3',
-      city: 'Zenica',
-      phone: '+387 32 444 000',
-      email: 'info@unze.ba',
-      website: 'https://www.unze.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/unze.svg'
-    },
-    {
-      id: 'inst-007',
-      name: 'Univerzitet u Istočnom Sarajevu',
-      address: 'Vuka Karadžića 30',
-      city: 'Istočno Sarajevo',
-      phone: '+387 57 320 100',
-      email: 'info@ues.rs.ba',
-      website: 'https://www.ues.rs.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/ues.svg'
-    },
-    {
-      id: 'inst-008',
-      name: 'Univerzitet u Bihaću',
-      address: 'Luke Marjanovića bb',
-      city: 'Bihać',
-      phone: '+387 37 221 000',
-      email: 'info@unbi.ba',
-      website: 'https://www.unbi.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/unbi.svg'
-    },
-    {
-      id: 'inst-009',
-      name: 'Internacionalni Univerzitet Sarajevo (IUS)',
-      address: 'Hrasnička cesta 15',
-      city: 'Sarajevo',
-      phone: '+387 33 957 175',
-      email: 'info@ius.edu.ba',
-      website: 'https://www.ius.edu.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/ius.svg'
-    },
-    {
-      id: 'inst-010',
-      name: 'Univerzitet Sarajevo School of Science and Technology (SSST)',
-      address: 'Hrasnička cesta 3',
-      city: 'Sarajevo',
-      phone: '+387 33 975 000',
-      email: 'info@ssst.edu.ba',
-      website: 'https://www.ssst.edu.ba',
-      institution_type: 'college',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/ssst.svg'
-    },
-    {
-      id: 'inst-011',
-      name: 'Univerzitet "Džemal Bijedić" u Mostaru',
-      address: 'Univerzitetski kampus bb',
-      city: 'Mostar',
-      phone: '+387 36 253 000',
-      email: 'info@unmo.ba',
-      website: 'https://www.unmo.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/djb.svg'
-    },
-    {
-      id: 'inst-012',
-      name: 'Univerzitet u Travniku',
-      address: 'Aleja konzula bb',
-      city: 'Travnik',
-      phone: '+387 30 333 000',
-      email: 'info@unt.ba',
-      website: 'https://www.unt.ba',
-      institution_type: 'university',
-      accreditation_status: 'accredited',
-      logo_url: '/logos/travnik.svg'
-    }
-  ];
-
-  const insertInstitution = db.prepare(`
-    INSERT OR IGNORE INTO institutions (id, name, address, city, phone, email, website, institution_type, accreditation_status, logo_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  institutions.forEach(inst => {
-    insertInstitution.run(inst.id, inst.name, inst.address, inst.city, inst.phone, inst.email, inst.website, inst.institution_type, inst.accreditation_status, inst.logo_url);
-  });
-
-  // Insert sample study programs
-  const studyPrograms = [
-    { id: 'prog-001', institution_id: 'inst-001', name: 'Računarstvo i informatika', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2025-12-31' },
-    { id: 'prog-002', institution_id: 'inst-001', name: 'Elektrotehnika', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2025-12-31' },
-    { id: 'prog-003', institution_id: 'inst-001', name: 'Pravo', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-06-30' },
-    { id: 'prog-004', institution_id: 'inst-002', name: 'Strojarstvo', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2025-09-30' },
-    { id: 'prog-005', institution_id: 'inst-002', name: 'Ekonomija', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2026-03-31' },
-    { id: 'prog-006', institution_id: 'inst-003', name: 'Medicina', degree_level: 'bachelor', duration_years: 6, ects_credits: 360, accreditation_status: 'accredited', accreditation_expiry: '2027-12-31' },
-    { id: 'prog-007', institution_id: 'inst-005', name: 'Matematika', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-12-31' },
-    { id: 'prog-008', institution_id: 'inst-005', name: 'Informatika', degree_level: 'master', duration_years: 2, ects_credits: 120, accreditation_status: 'accredited', accreditation_expiry: '2027-06-30' },
-    { id: 'prog-009', institution_id: 'inst-006', name: 'Građevinarstvo', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-09-30' },
-    { id: 'prog-010', institution_id: 'inst-006', name: 'Metalurgija', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-05-31' },
-    { id: 'prog-011', institution_id: 'inst-007', name: 'Ekonomija', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2026-03-31' },
-    { id: 'prog-012', institution_id: 'inst-007', name: 'Pravo', degree_level: 'master', duration_years: 2, ects_credits: 120, accreditation_status: 'accredited', accreditation_expiry: '2027-03-31' },
-    { id: 'prog-013', institution_id: 'inst-008', name: 'Šumarstvo', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-11-30' },
-    { id: 'prog-014', institution_id: 'inst-009', name: 'Software Engineering', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2027-12-31' },
-    { id: 'prog-015', institution_id: 'inst-009', name: 'International Relations', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2027-12-31' },
-    { id: 'prog-016', institution_id: 'inst-010', name: 'Computer Science', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-12-31' },
-    { id: 'prog-017', institution_id: 'inst-010', name: 'Information Systems', degree_level: 'master', duration_years: 2, ects_credits: 120, accreditation_status: 'accredited', accreditation_expiry: '2027-06-30' },
-    { id: 'prog-018', institution_id: 'inst-011', name: 'Mašinstvo', degree_level: 'bachelor', duration_years: 4, ects_credits: 240, accreditation_status: 'accredited', accreditation_expiry: '2026-10-31' },
-    { id: 'prog-019', institution_id: 'inst-011', name: 'Nastavnički smjer', degree_level: 'master', duration_years: 2, ects_credits: 120, accreditation_status: 'accredited', accreditation_expiry: '2027-05-31' },
-    { id: 'prog-020', institution_id: 'inst-012', name: 'Biznis i menadžment', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited', accreditation_expiry: '2026-07-31' }
-  ];
-
-  const insertProgram = db.prepare(`
-    INSERT OR IGNORE INTO study_programs (id, institution_id, name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  studyPrograms.forEach(prog => {
-    insertProgram.run(prog.id, prog.institution_id, prog.name, prog.degree_level, prog.duration_years, prog.ects_credits, prog.accreditation_status, prog.accreditation_expiry);
-  });
-
-  // Insert sample users
-  const users = [
-    { id: 'user-001', email: 'admin@registry.ba', password: 'admin123', full_name: 'Administrator Sistema', role: 'admin' },
-    { id: 'user-002', email: 'officer@registry.ba', password: 'officer123', full_name: 'Službenik za akreditaciju', role: 'officer' },
-    { id: 'user-003', email: 'info@unsa.ba', password: 'institution123', full_name: 'UNSA Administrator', role: 'institution', institution_id: 'inst-001' },
-    { id: 'user-004', email: 'info@unibl.org', password: 'institution123', full_name: 'UNBL Administrator', role: 'institution', institution_id: 'inst-005' },
-    { id: 'user-005', email: 'info@unze.ba', password: 'institution123', full_name: 'UNZE Administrator', role: 'institution', institution_id: 'inst-006' },
-    { id: 'user-006', email: 'info@ues.rs.ba', password: 'institution123', full_name: 'UES Administrator', role: 'institution', institution_id: 'inst-007' },
-    { id: 'user-007', email: 'info@unbi.ba', password: 'institution123', full_name: 'UNBI Administrator', role: 'institution', institution_id: 'inst-008' },
-    { id: 'user-008', email: 'info@ius.edu.ba', password: 'institution123', full_name: 'IUS Administrator', role: 'institution', institution_id: 'inst-009' },
-    { id: 'user-009', email: 'info@ssst.edu.ba', password: 'institution123', full_name: 'SSST Administrator', role: 'institution', institution_id: 'inst-010' },
-    { id: 'user-010', email: 'info@unmo.ba', password: 'institution123', full_name: 'UNMO Administrator', role: 'institution', institution_id: 'inst-011' },
-    { id: 'user-011', email: 'info@unt.ba', password: 'institution123', full_name: 'UNT Administrator', role: 'institution', institution_id: 'inst-012' }
-  ];
-
-  const insertUser = db.prepare(`
-    INSERT OR IGNORE INTO users (id, email, password, full_name, role, institution_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  users.forEach(user => {
-    insertUser.run(user.id, user.email, user.password, user.full_name, user.role, user.institution_id || null);
-  });
-}
+ 
 
 // API Routes
 
 // Authentication
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
+  if (useSupabase) {
+    (async () => {
+      const { data, error } = await supabase!.from('users').select('*').eq('email', email).eq('password', password).single();
+      if (error || !data) return res.status(401).json({ error: 'Invalid credentials' });
+      const { password: _pw, ...userWithoutPassword } = data as any;
+      return res.json({ user: userWithoutPassword });
+    })();
+    return;
+  }
   if (IS_VERCEL && !useSupabase) {
     return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const user = db.prepare('SELECT * FROM users WHERE email = ? AND password = ?').get(email, password) as any;
-  
   if (user) {
     const { password: _, ...userWithoutPassword } = user;
     res.json({ user: userWithoutPassword });
@@ -1303,16 +900,11 @@ app.delete('/api/documents/:id', (req, res) => {
 
 // Bulk import institutions from CSV (upload)
 app.post('/api/institutions/import-csv', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No CSV file uploaded' });
-  }
-
+  if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
   const csvData = fs.readFileSync(req.file.path, 'utf-8');
   const lines = csvData.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length === 0) {
-    return res.status(400).json({ error: 'CSV is empty' });
-  }
-
+  if (lines.length === 0) return res.status(400).json({ error: 'CSV is empty' });
   const parseCsvLine = (line: string) => {
     const result: string[] = [];
     let current = '';
@@ -1320,23 +912,12 @@ app.post('/api/institutions/import-csv', upload.single('file'), (req, res) => {
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
-      }
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; } else { inQuotes = !inQuotes; }
+      } else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ''; } else { current += ch; }
     }
     result.push(current.trim());
     return result;
   };
-
   const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase());
   const idx = {
     name: headers.indexOf('naziv') !== -1 ? headers.indexOf('naziv') : headers.indexOf('name'),
@@ -1346,29 +927,25 @@ app.post('/api/institutions/import-csv', upload.single('file'), (req, res) => {
     website: headers.indexOf('website') !== -1 ? headers.indexOf('website') : headers.indexOf('web stranica'),
     type: headers.indexOf('tip') !== -1 ? headers.indexOf('tip') : headers.indexOf('institution_type')
   };
-
-  const insertInstitution = db.prepare(`
-    INSERT OR IGNORE INTO institutions (id, name, address, city, phone, email, website, institution_type, accreditation_status, logo_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   let inserted = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCsvLine(lines[i]);
-    const name = idx.name >= 0 ? cols[idx.name] : undefined;
-    if (!name) continue;
-    const city = idx.city >= 0 ? cols[idx.city] : '';
-    const address = idx.address >= 0 ? cols[idx.address] : '';
-    const email = idx.email >= 0 ? cols[idx.email] : '';
-    const website = idx.website >= 0 ? cols[idx.website] : '';
-    const type = idx.type >= 0 ? cols[idx.type] : 'university';
-    const id = `inst-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i}`.slice(0, 32);
-    const logo_url = `https://via.placeholder.com/150x150/1e40af/ffffff?text=${encodeURIComponent(name.slice(0, 12))}`;
-    const result = insertInstitution.run(id, name, address, city, '', email, website, type, 'accredited', logo_url);
-    if (result.changes > 0) inserted++;
-  }
-
-  res.json({ inserted });
+  (async () => {
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      const name = idx.name >= 0 ? cols[idx.name] : undefined;
+      if (!name) continue;
+      const city = idx.city >= 0 ? cols[idx.city] : '';
+      const address = idx.address >= 0 ? cols[idx.address] : '';
+      const email = idx.email >= 0 ? cols[idx.email] : '';
+      const website = idx.website >= 0 ? cols[idx.website] : '';
+      const type = idx.type >= 0 ? cols[idx.type] : 'university';
+      const id = `inst-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i}`.slice(0, 32);
+      const logo_url = `https://via.placeholder.com/150x150/1e40af/ffffff?text=${encodeURIComponent(name.slice(0, 12))}`;
+      const { error } = await supabase!.from('institutions').upsert({ id, name, address, city, phone: '', email, website, institution_type: type, accreditation_status: 'accredited', logo_url });
+      if (!error) inserted++;
+    }
+    try { fs.unlinkSync(req.file.path); } catch {}
+    res.json({ inserted });
+  })();
 });
 
 // Cities endpoint for filters
@@ -1376,119 +953,93 @@ app.post('/api/institutions/import-csv', upload.single('file'), (req, res) => {
 
 // Statistics
 app.get('/api/statistics', (req, res) => {
-  try {
-    if (IS_VERCEL && !useSupabase) {
-      return res.status(500).json({ error: 'Supabase is not configured' });
-    }
-    const stats = db.prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM institutions) AS total_institutions,
-        (SELECT COUNT(*) FROM institutions WHERE accreditation_status = 'accredited') AS accredited_institutions,
-        (SELECT COUNT(*) FROM study_programs) AS total_programs,
-        (SELECT COUNT(*) FROM study_programs WHERE accreditation_status = 'accredited') AS accredited_programs
-    `).get() as any;
-
+  (async () => {
+    if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+    const { count: instTotal } = await supabase!.from('institutions').select('*', { count: 'exact', head: true });
+    const { count: instAcc } = await supabase!.from('institutions').select('*', { count: 'exact', head: true }).eq('accreditation_status', 'accredited');
+    const { count: progTotal } = await supabase!.from('study_programs').select('*', { count: 'exact', head: true });
+    const { count: progAcc } = await supabase!.from('study_programs').select('*', { count: 'exact', head: true }).eq('accreditation_status', 'accredited');
     res.json({
-      total_institutions: stats?.total_institutions ?? 0,
-      accredited_institutions: stats?.accredited_institutions ?? 0,
-      total_programs: stats?.total_programs ?? 0,
-      accredited_programs: stats?.accredited_programs ?? 0
+      total_institutions: instTotal || 0,
+      accredited_institutions: instAcc || 0,
+      total_programs: progTotal || 0,
+      accredited_programs: progAcc || 0
     });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to compute statistics' });
-  }
+  })();
 });
 
 app.get('/api/audit-logs', (req, res) => {
   const actorRole = (req.headers['x-user-role'] || '').toString();
-  if (actorRole !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  if (actorRole !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { limit = 100, offset = 0, resource_type, action, actor_role, search } = req.query as any;
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
-  const lim = Number(limit) || 100;
-  const off = Number(offset) || 0;
-  let q = 'SELECT * FROM audit_logs WHERE 1=1';
-  const p: any[] = [];
-  if (resource_type) { q += ' AND resource_type = ?'; p.push(resource_type); }
-  if (action) { q += ' AND action = ?'; p.push(action); }
-  if (actor_role) { q += ' AND actor_role = ?'; p.push(actor_role); }
-  if (search) { q += ' AND (actor_name LIKE ? OR actor_id LIKE ? OR resource_id LIKE ?)'; p.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-  q += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  p.push(lim, off);
-  const rows = db.prepare(q).all(...p);
-  res.json(rows);
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+  (async () => {
+    let q = supabase!.from('audit_logs').select('*');
+    if (resource_type) q = q.eq('resource_type', resource_type);
+    if (action) q = q.eq('action', action);
+    if (actor_role) q = q.eq('actor_role', actor_role);
+    if (search) q = q.or(`actor_name.ilike.%${search}%,actor_id.ilike.%${search}%,resource_id.ilike.%${search}%`);
+    const lim = Number(limit) || 100;
+    const off = Number(offset) || 0;
+    const { data, error } = await q.order('created_at', { ascending: false }).range(off, off + lim - 1);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  })();
 });
 
 app.get('/api/audit-logs/export', (req, res) => {
   const actorRole = (req.headers['x-user-role'] || '').toString();
-  if (actorRole !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  if (actorRole !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { format = 'csv', resource_type, action, actor_role, search } = req.query as any;
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
-  let q = 'SELECT * FROM audit_logs WHERE 1=1';
-  const p: any[] = [];
-  if (resource_type) { q += ' AND resource_type = ?'; p.push(resource_type); }
-  if (action) { q += ' AND action = ?'; p.push(action); }
-  if (actor_role) { q += ' AND actor_role = ?'; p.push(actor_role); }
-  if (search) { q += ' AND (actor_name LIKE ? OR actor_id LIKE ? OR resource_id LIKE ?)'; p.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-  q += ' ORDER BY created_at DESC';
-  const rows = db.prepare(q).all(...p) as any[];
-  if (String(format).toLowerCase() === 'json') {
-    res.setHeader('Content-Type', 'application/json');
-    res.json(rows);
-  } else {
-    const header = ['created_at','actor_name','actor_role','action','resource_type','resource_id','changed_fields','prev_values','new_values'];
-    const esc = (v: any) => {
-      const s = v === null || v === undefined ? '' : String(v);
-      const needs = /[",\n]/.test(s);
-      return needs ? '"' + s.replace(/"/g,'""') + '"' : s;
-    };
-    const csv = [header.join(',')].concat(rows.map(r => header.map(h => esc(r[h])).join(','))).join('\n');
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="audit_logs.csv"');
-    res.send(csv);
-  }
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+  (async () => {
+    let q = supabase!.from('audit_logs').select('*');
+    if (resource_type) q = q.eq('resource_type', resource_type);
+    if (action) q = q.eq('action', action);
+    if (actor_role) q = q.eq('actor_role', actor_role);
+    if (search) q = q.or(`actor_name.ilike.%${search}%,actor_id.ilike.%${search}%,resource_id.ilike.%${search}%`);
+    const { data, error } = await q.order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    const rows = (data || []) as any[];
+    if (String(format).toLowerCase() === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.json(rows);
+    } else {
+      const header = ['created_at','actor_name','actor_role','action','resource_type','resource_id','changed_fields','prev_values','new_values'];
+      const esc = (v: any) => {
+        const s = v === null || v === undefined ? '' : String(v);
+        const needs = /[",\n]/.test(s);
+        return needs ? '"' + s.replace(/"/g,'""') + '"' : s;
+      };
+      const csv = [header.join(',')].concat(rows.map(r => header.map(h => esc(r[h])).join(','))).join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="audit_logs.csv"');
+      res.send(csv);
+    }
+  })();
 });
 
 app.get('/api/_debug/audit', (req, res) => {
   const actorRole = (req.headers['x-user-role'] || '').toString();
-  if (actorRole !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  try {
-    if (IS_VERCEL && !useSupabase) {
-      return res.status(500).json({ error: 'Supabase is not configured' });
-    }
-    const master = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_logs'").get() as any;
-    const count = db.prepare('SELECT COUNT(*) as c FROM audit_logs').get() as any;
-    res.json({ schema: master?.sql || null, count: count?.c || 0 });
-  } catch (e: any) {
-    res.status(500).json({ error: 'Debug failed' });
-  }
+  if (actorRole !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  (async () => {
+    if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+    const { count } = await supabase!.from('audit_logs').select('*', { count: 'exact', head: true });
+    res.json({ schema: null, count: count || 0 });
+  })();
 });
 
 app.post('/api/_debug/audit-insert', (req, res) => {
   const actorRole = (req.headers['x-user-role'] || '').toString();
-  if (actorRole !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  try {
-    if (IS_VERCEL && !useSupabase) {
-      return res.status(500).json({ error: 'Supabase is not configured' });
-    }
-    db.prepare('INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run('audit-' + Date.now(), 'user-001', 'admin', 'Administrator Sistema', 'debug', 'user', 'user-xyz', '["email"]', '{"email":"old"}', '{"email":"new"}');
-    const count = db.prepare('SELECT COUNT(*) as c FROM audit_logs').get() as any;
-    res.json({ ok: true, count: count?.c || 0 });
-  } catch (e: any) {
-    res.status(500).json({ error: 'Debug insert failed' });
-  }
+  if (actorRole !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  (async () => {
+    if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+    const id = 'audit-' + Date.now();
+    const { error } = await supabase!.from('audit_logs').insert({ id, actor_id: 'user-001', actor_role: 'admin', actor_name: 'Administrator Sistema', action: 'debug', resource_type: 'user', resource_id: 'user-xyz', changed_fields: '["email"]', prev_values: '{"email":"old"}', new_values: '{"email":"new"}' });
+    if (error) return res.status(500).json({ error: 'Debug insert failed' });
+    const { count } = await supabase!.from('audit_logs').select('*', { count: 'exact', head: true });
+    res.json({ ok: true, count: count || 0 });
+  })();
 });
 
 // Setup: create storage bucket 'documents' (public)
@@ -1508,6 +1059,34 @@ app.post('/api/_setup/storage', async (req, res) => {
   }
 });
 
+// Setup: seed minimal data into Supabase
+app.post('/api/_setup/seed', async (req, res) => {
+  try {
+    if (!useSupabase || !supabase) return res.status(400).json({ error: 'Supabase is not configured' });
+    const institutions = [
+      { id: 'inst-001', name: 'Univerzitet u Sarajevu', address: 'Obala Kulina bana 7/II', city: 'Sarajevo', phone: '+387 33 668 500', email: 'info@unsa.ba', website: 'https://www.unsa.ba', institution_type: 'university', accreditation_status: 'accredited', logo_url: '/logos/unsa.svg' },
+      { id: 'inst-002', name: 'Univerzitet u Tuzli', address: 'Univerzitetska 4', city: 'Tuzla', phone: '+387 35 320 800', email: 'info@untz.ba', website: 'https://www.untz.ba', institution_type: 'university', accreditation_status: 'accredited', logo_url: '/logos/untz.svg' }
+    ];
+    const users = [
+      { id: 'user-001', email: 'admin@registry.ba', password: 'admin123', full_name: 'Administrator Sistema', role: 'admin', is_active: 1 },
+      { id: 'user-003', email: 'info@unsa.ba', password: 'institution123', full_name: 'UNSA Administrator', role: 'institution', is_active: 1, institution_id: 'inst-001' }
+    ];
+    const { error: e1 } = await supabase.from('institutions').upsert(institutions, { onConflict: 'id' });
+    if (e1) return res.status(500).json({ error: e1.message });
+    const { error: e2 } = await supabase.from('users').upsert(users, { onConflict: 'id' });
+    if (e2) return res.status(500).json({ error: e2.message });
+    const programs = [
+      { id: 'prog-001', institution_id: 'inst-001', name: 'Računarstvo i informatika', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited' },
+      { id: 'prog-004', institution_id: 'inst-002', name: 'Strojarstvo', degree_level: 'bachelor', duration_years: 3, ects_credits: 180, accreditation_status: 'accredited' }
+    ];
+    const { error: e3 } = await supabase.from('study_programs').upsert(programs, { onConflict: 'id' });
+    if (e3) return res.status(500).json({ error: e3.message });
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(500).json({ error: 'Seed failed' });
+  }
+});
+
 // Export current database as SQL (compatible with Supabase schema)
 app.get('/api/export/sql', (req, res) => {
   function esc(v: any) {
@@ -1521,42 +1100,30 @@ app.get('/api/export/sql', (req, res) => {
     const values = cols.map(c => esc((row as any)[c]));
     return `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${values.join(', ')});`;
   }
-  const lines: string[] = [];
-  lines.push('-- Schema');
-  lines.push(fs.readFileSync(path.join(ROOT_DIR, 'supabase/schema.sql'), 'utf-8'));
-  lines.push('\n-- Data\nBEGIN;');
-  try {
-    // institutions
-    const instCols = ['id','name','address','city','phone','email','website','institution_type','accreditation_status','logo_url','ownership_type','founded_on','accreditation_valid_from','accreditation_valid_to','competent_authority','notes','registration_number','tax_id','short_name','municipality','postal_code','country','founder_name','founding_act_reference','head_name','head_title','fax','is_active','created_at','updated_at'];
-    const institutions = db.prepare('SELECT ' + instCols.join(',') + ' FROM institutions').all() as any[];
-    institutions.forEach(r => lines.push(insertStmt('public.institutions', instCols, r)));
-    // study_programs
-    const spCols = ['id','institution_id','name','degree_level','duration_years','ects_credits','accreditation_status','accreditation_expiry','created_at','updated_at'];
-    const programs = db.prepare('SELECT ' + spCols.join(',') + ' FROM study_programs').all() as any[];
-    programs.forEach(r => lines.push(insertStmt('public.study_programs', spCols, r)));
-    // accreditation_processes
-    const apCols = ['id','institution_id','program_id','assigned_officer_id','process_type','status','application_date','decision_date','decision','notes','created_at','updated_at'];
-    const processes = db.prepare('SELECT ' + apCols.join(',') + ' FROM accreditation_processes').all() as any[];
-    processes.forEach(r => lines.push(insertStmt('public.accreditation_processes', apCols, r)));
-    // documents
-    const docCols = ['id','institution_id','program_id','process_id','document_type','title','description','issuer','issued_at','number','file_name','file_path','file_size','mime_type','sha256','version','is_confidential','tags','uploaded_by','uploaded_at'];
-    const documents = db.prepare('SELECT ' + docCols.join(',') + ' FROM documents').all() as any[];
-    documents.forEach(r => lines.push(insertStmt('public.documents', docCols, r)));
-    // users
-    const userCols = ['id','email','password','full_name','role','is_active','institution_id','created_at'];
-    const users = db.prepare('SELECT ' + userCols.join(',') + ' FROM users').all() as any[];
-    users.forEach(r => lines.push(insertStmt('public.users', userCols, r)));
-    // audit_logs
-    const alCols = ['id','actor_id','actor_role','actor_name','action','resource_type','resource_id','changed_fields','prev_values','new_values','created_at'];
-    const logs = db.prepare('SELECT ' + alCols.join(',') + ' FROM audit_logs').all() as any[];
-    logs.forEach(r => lines.push(insertStmt('public.audit_logs', alCols, r)));
-  } catch (e: any) {
-    lines.push('-- Export error: ' + String(e?.message || e));
-  }
-  lines.push('COMMIT;');
-  const sql = lines.join('\n');
-  res.setHeader('Content-Type', 'application/sql');
-  res.send(sql);
+  (async () => {
+    if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+    const lines: string[] = [];
+    lines.push('-- Schema');
+    lines.push(fs.readFileSync(path.join(ROOT_DIR, 'supabase/schema.sql'), 'utf-8'));
+    lines.push('\n-- Data\nBEGIN;');
+    const pushRows = (table: string, cols: string[], rows: any[]) => { rows.forEach(r => lines.push(insertStmt(`public.${table}`, cols, r))); };
+    const { data: inst } = await supabase!.from('institutions').select('*');
+    if (inst) pushRows('institutions', ['id','name','address','city','phone','email','website','institution_type','accreditation_status','logo_url','ownership_type','founded_on','accreditation_valid_from','accreditation_valid_to','competent_authority','notes','registration_number','tax_id','short_name','municipality','postal_code','country','founder_name','founding_act_reference','head_name','head_title','fax','is_active','created_at','updated_at'], inst as any[]);
+    const { data: sp } = await supabase!.from('study_programs').select('*');
+    if (sp) pushRows('study_programs', ['id','institution_id','name','degree_level','duration_years','ects_credits','accreditation_status','accreditation_expiry','created_at','updated_at'], sp as any[]);
+    const { data: ap } = await supabase!.from('accreditation_processes').select('*');
+    if (ap) pushRows('accreditation_processes', ['id','institution_id','program_id','assigned_officer_id','process_type','status','application_date','decision_date','decision','notes','created_at','updated_at'], ap as any[]);
+    const { data: docs } = await supabase!.from('documents').select('*');
+    if (docs) pushRows('documents', ['id','institution_id','program_id','process_id','document_type','title','description','issuer','issued_at','number','file_name','file_path','file_size','mime_type','sha256','version','is_confidential','tags','uploaded_by','uploaded_at'], docs as any[]);
+    const { data: users } = await supabase!.from('users').select('*');
+    if (users) pushRows('users', ['id','email','password','full_name','role','is_active','institution_id','created_at'], users as any[]);
+    const { data: logs } = await supabase!.from('audit_logs').select('*');
+    if (logs) pushRows('audit_logs', ['id','actor_id','actor_role','actor_name','action','resource_type','resource_id','changed_fields','prev_values','new_values','created_at'], logs as any[]);
+    lines.push('COMMIT;');
+    const sql = lines.join('\n');
+    res.setHeader('Content-Type', 'application/sql');
+    res.send(sql);
+  })();
 });
 
 // Maintenance: normalize logo URLs to local assets to avoid external DNS issues
@@ -1585,11 +1152,12 @@ app.post('/api/maintenance/fix-logos', (req, res) => {
 
 // Users
 app.get('/api/users', (req, res) => {
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
-  const users = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users').all();
-  res.json(users);
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+  (async () => {
+    const { data, error } = await supabase!.from('users').select('id,email,full_name,role,is_active,institution_id,created_at').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  })();
 });
 
 app.post('/api/users', (req, res) => {
@@ -1599,9 +1167,7 @@ app.post('/api/users', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { email, password, full_name, role, is_active = 1, institution_id = null } = req.body;
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
   if (!email || !password || !full_name) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -1609,30 +1175,18 @@ app.post('/api/users', (req, res) => {
   if (!allowedRoles.has(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
-  const id = 'user-' + Date.now();
-  const activeFlag = typeof is_active === 'boolean' ? (is_active ? 1 : 0) : Number(is_active) ? 1 : 0;
-  const instId = institution_id ? institution_id : null;
-  try {
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
-    if (existing?.id) {
-      return res.status(409).json({ error: 'Email already exists' });
-    }
-    const result = db.prepare('INSERT INTO users (id, email, password, full_name, role, is_active, institution_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, email, password, full_name, role, activeFlag, instId);
-    if (result.changes > 0) {
-      const row = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users WHERE id = ?').get(id);
-      const an = actorNameById(actorId);
-      const payload = diffObject(null, { email, full_name, role, is_active: activeFlag, institution_id: instId });
-      db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'user', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
-      res.json(row);
-    } else {
-      res.status(500).json({ error: 'Failed to create user' });
-    }
-  } catch (e: any) {
-    const msg = String(e?.message || '');
-    res.status(500).json({ error: 'Failed to create user' });
-  }
+  (async () => {
+    const id = 'user-' + Date.now();
+    const activeFlag = typeof is_active === 'boolean' ? (is_active ? 1 : 0) : Number(is_active) ? 1 : 0;
+    const instId = institution_id ? institution_id : null;
+    const { data: existing } = await supabase!.from('users').select('id').eq('email', email).single();
+    if (existing?.id) return res.status(409).json({ error: 'Email already exists' });
+    const { data, error } = await supabase!.from('users').insert({ id, email, password, full_name, role, is_active: activeFlag, institution_id: instId }).select('id,email,full_name,role,is_active,institution_id,created_at').single();
+    if (error) return res.status(500).json({ error: 'Failed to create user' });
+    const payload = diffObject(null, { email, full_name, role, is_active: activeFlag, institution_id: instId });
+    await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: null, action: 'create', resource_type: 'user', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: null, new_values: JSON.stringify(payload.nextOut) });
+    res.json(data);
+  })();
 });
 
 app.put('/api/users/:id', (req, res) => {
@@ -1643,42 +1197,29 @@ app.put('/api/users/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { email, full_name, role, is_active, institution_id } = req.body;
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
   if (role) {
     const allowedRoles = new Set(['admin', 'operator', 'viewer', 'institution']);
     if (!allowedRoles.has(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
   }
-  const activeFlag = typeof is_active === 'boolean' ? (is_active ? 1 : 0) : (is_active === undefined ? undefined : (Number(is_active) ? 1 : 0));
-  try {
-    const before = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users WHERE id = ?').get(id);
+  (async () => {
     if (email) {
-      const other = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
-      if (other?.id && other.id !== id) {
-        return res.status(409).json({ error: 'Email already exists' });
-      }
+      const { data: other } = await supabase!.from('users').select('id').eq('email', email).single();
+      if (other?.id && other.id !== id) return res.status(409).json({ error: 'Email already exists' });
     }
-    const result = db.prepare('UPDATE users SET email = COALESCE(?, email), full_name = COALESCE(?, full_name), role = COALESCE(?, role), is_active = COALESCE(?, is_active), institution_id = COALESCE(?, institution_id) WHERE id = ?')
-      .run(email, full_name, role, activeFlag, institution_id ?? null, id);
-    if (result.changes > 0) {
-      const row = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users WHERE id = ?').get(id);
-      const an = actorNameById(actorId);
-      const fields = Object.keys(req.body || {});
-      const payload = diffObject(before, row, fields);
-      if (payload.changed.length > 0) {
-        db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run('audit-' + Date.now(), actorId, actorRole, an, 'update', 'user', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), JSON.stringify(payload.nextOut));
-      }
-      res.json(row);
-    } else {
-      res.status(404).json({ error: 'User not found' });
+    const upd: any = { email, full_name, role, is_active, institution_id };
+    Object.keys(upd).forEach(k => { if (upd[k] === undefined) delete upd[k]; });
+    const { data, error } = await supabase!.from('users').update(upd).eq('id', id).select('id,email,full_name,role,is_active,institution_id,created_at').single();
+    if (error) return res.status(404).json({ error: 'User not found' });
+    const fields = Object.keys(upd || {});
+    const payload = diffObject({}, upd, fields);
+    if (payload.changed.length > 0) {
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: null, action: 'update', resource_type: 'user', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: JSON.stringify(payload.nextOut) });
     }
-  } catch (e: any) {
-    res.status(500).json({ error: 'Failed to update user' });
-  }
+    res.json(data);
+  })();
 });
 
 app.delete('/api/users/:id', (req, res) => {
@@ -1688,18 +1229,15 @@ app.delete('/api/users/:id', (req, res) => {
   if (actorRole !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
-  const before = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users WHERE id = ?').get(id);
-  const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
-  if (result.changes > 0) {
-    const an = actorNameById(actorId);
+  if (!useSupabase) return res.status(500).json({ error: 'Supabase is not configured' });
+  (async () => {
+    const { data: before } = await supabase!.from('users').select('*').eq('id', id).single();
+    const { error } = await supabase!.from('users').delete().eq('id', id);
+    if (error) return res.status(500).json({ error: 'Failed to delete user' });
     const payload = diffObject(before, null);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'user', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
-  }
-  res.json({ ok: result.changes > 0 });
+    await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: null, action: 'delete', resource_type: 'user', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: null });
+    res.json({ ok: true });
+  })();
 });
 
 // Global error handler to always return JSON
@@ -1711,6 +1249,3 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 export default app;
-  if (IS_VERCEL && !useSupabase) {
-    return res.status(500).json({ error: 'Supabase is not configured' });
-  }
