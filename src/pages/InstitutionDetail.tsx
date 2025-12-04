@@ -297,7 +297,7 @@ const InstitutionDetail: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 md:gap-x-16 lg:gap-x-24">
             <div className="space-y-2">
               <div className="flex justify-between"><span className="text-gray-600">Kratak naziv:</span><span className="font-medium">{(selectedInstitution as any).short_name || '-'}</span></div>
               <div className="flex justify-between"><span className="text-gray-600">Tip ustanove:</span><span className="font-medium">{translateType(selectedInstitution.institution_type)}</span></div>
