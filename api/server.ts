@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import Database from 'better-sqlite3';
+let Database: any = null;
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -54,7 +54,7 @@ const IS_VERCEL = !!process.env.VERCEL;
 const useSupabase = !!supabase;
 
 // Initialize SQLite database (disabled on Vercel)
-const db = IS_VERCEL ? null : new Database('registry.db');
+const db = IS_VERCEL ? null : (Database || (Database = require('better-sqlite3')) , new Database('registry.db'));
 
 // Create tables
 if (db) db.exec(`
