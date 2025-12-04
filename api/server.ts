@@ -1125,6 +1125,23 @@ app.get('/api/documents', (req, res) => {
   res.json(rows);
 });
 
+// Cities
+app.get('/api/cities', (req, res) => {
+  if (useSupabase) {
+    (async () => {
+      const { data, error } = await supabase!.from('institutions').select('city');
+      if (error) return res.status(500).json({ error: error.message });
+      const set = new Set<string>();
+      (data || []).forEach((r: any) => { const c = String(r.city || '').trim(); if (c) set.add(c); });
+      const list = Array.from(set).sort((a, b) => a.localeCompare(b));
+      return res.json(list);
+    })();
+    return;
+  }
+  const rows = db.prepare('SELECT DISTINCT city FROM institutions WHERE city IS NOT NULL AND city != "" ORDER BY city').all() as any[];
+  res.json(rows.map(r => r.city));
+});
+
 // Documents: Download
 app.get('/api/documents/:id/download', (req, res) => {
   const id = req.params.id;
