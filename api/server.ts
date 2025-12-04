@@ -6,10 +6,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { fileURLToPath } from 'url';
+ 
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const ROOT_DIR = process.cwd();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,7 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // Create uploads directory (for logos and temporary files)
-const uploadsDir = path.join(__dirname, '../uploads');
+const uploadsDir = path.join(ROOT_DIR, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -28,7 +27,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.use('/uploads', express.static(uploadsDir));
 
 // DMS storage root for documents
-const storageRoot = path.join(__dirname, '../storage/app/files');
+const storageRoot = path.join(ROOT_DIR, 'storage/app/files');
 if (!fs.existsSync(storageRoot)) {
   fs.mkdirSync(storageRoot, { recursive: true });
 }
@@ -510,6 +509,9 @@ if (db) {
 // Authentication
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const user = db.prepare('SELECT * FROM users WHERE email = ? AND password = ?').get(email, password) as any;
   
   if (user) {
@@ -585,6 +587,9 @@ app.post('/api/institutions', (req, res) => {
     return;
   }
   // SQLite fallback
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const id = 'inst-' + Date.now();
   const stmt = db.prepare(`INSERT INTO institutions (id, name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(id, name, address, city, phone || '', email, website || '', institution_type, accreditation_status || 'pending', logo_url || '', ownership_type || null, founded_on || null, accreditation_valid_from || null, accreditation_valid_to || null, competent_authority || null, notes || null, registration_number || null, tax_id || null, short_name || null, municipality || null, postal_code || null, country || 'Bosna i Hercegovina', founder_name || null, founding_act_reference || null, head_name || null, head_title || null, fax || null, (typeof is_active === 'boolean' ? (is_active ? 1 : 0) : (is_active === undefined ? 1 : (Number(is_active) ? 1 : 0))));
@@ -624,6 +629,9 @@ app.put('/api/institutions/:id', (req, res) => {
       return res.json(data);
     })();
     return;
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const before = db.prepare('SELECT * FROM institutions WHERE id = ?').get(id);
   const stmt = db.prepare(`UPDATE institutions SET name = COALESCE(?, name), address = COALESCE(?, address), city = COALESCE(?, city), phone = COALESCE(?, phone), email = COALESCE(?, email), website = COALESCE(?, website), institution_type = COALESCE(?, institution_type), accreditation_status = COALESCE(?, accreditation_status), logo_url = COALESCE(?, logo_url), ownership_type = COALESCE(?, ownership_type), founded_on = COALESCE(?, founded_on), accreditation_valid_from = COALESCE(?, accreditation_valid_from), accreditation_valid_to = COALESCE(?, accreditation_valid_to), competent_authority = COALESCE(?, competent_authority), notes = COALESCE(?, notes), registration_number = COALESCE(?, registration_number), tax_id = COALESCE(?, tax_id), short_name = COALESCE(?, short_name), municipality = COALESCE(?, municipality), postal_code = COALESCE(?, postal_code), country = COALESCE(?, country), founder_name = COALESCE(?, founder_name), founding_act_reference = COALESCE(?, founding_act_reference), head_name = COALESCE(?, head_name), head_title = COALESCE(?, head_title), fax = COALESCE(?, fax), is_active = COALESCE(?, is_active), updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
@@ -681,6 +689,9 @@ app.get('/api/institutions/:id', (req, res) => {
     })();
     return;
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const institution = db.prepare('SELECT * FROM institutions WHERE id = ?').get(req.params.id) as any;
   if (!institution) return res.status(404).json({ error: 'Institution not found' });
   const programs = db.prepare('SELECT * FROM study_programs WHERE institution_id = ?').all(req.params.id);
@@ -735,6 +746,9 @@ app.post('/api/study-programs', (req, res) => {
     })();
     return;
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const id = 'prog-' + Date.now();
   const stmt = db.prepare(`INSERT INTO study_programs (id, institution_id, name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(id, institution_id, name, degree_level, duration_years, ects_credits || null, accreditation_status || 'pending', accreditation_expiry || null);
@@ -758,6 +772,9 @@ app.put('/api/study-programs/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry } = req.body;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const before = db.prepare('SELECT * FROM study_programs WHERE id = ?').get(id);
   const stmt = db.prepare(`
     UPDATE study_programs SET
@@ -871,6 +888,9 @@ app.post('/api/accreditation-processes', (req, res) => {
     })();
     return;
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   if (program_id) {
     const prog = db.prepare('SELECT institution_id FROM study_programs WHERE id = ?').get(program_id) as any;
     if (!prog || prog.institution_id !== institution_id) {
@@ -900,6 +920,9 @@ app.put('/api/accreditation-processes/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { status, assigned_officer_id, decision, decision_date, notes, program_id } = req.body;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const before = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id) as any;
   if (program_id) {
     const prog = db.prepare('SELECT institution_id FROM study_programs WHERE id = ?').get(program_id) as any;
@@ -994,6 +1017,9 @@ app.post('/api/institutions/:id/logo', upload.single('logo'), (req, res) => {
   const actorId = (req.headers['x-user-id'] || '').toString();
   if (!['admin', 'operator'].includes(actorRole)) {
     return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const id = req.params.id;
   if (!req.file) {
@@ -1090,6 +1116,9 @@ app.post('/api/documents/upload', upload.single('file'), (req, res) => {
     return;
   }
   // SQLite/local storage fallback
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const targetDir = path.join(storageRoot, instId);
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   let finalPath = path.join(targetDir, finalName);
@@ -1165,6 +1194,9 @@ app.get('/api/cities', (req, res) => {
     })();
     return;
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const rows = db.prepare('SELECT DISTINCT city FROM institutions WHERE city IS NOT NULL AND city != "" ORDER BY city').all() as any[];
   res.json(rows.map(r => r.city));
 });
@@ -1185,9 +1217,9 @@ app.get('/api/documents/:id/download', (req, res) => {
   if (!doc) return res.status(404).json({ error: 'Not found' });
   let absolute: string;
   if (String(doc.file_path).startsWith('/storage/')) {
-    absolute = path.join(__dirname, '..', doc.file_path.replace(/^\//, ''));
+    absolute = path.join(ROOT_DIR, doc.file_path.replace(/^\//, ''));
   } else {
-    absolute = path.join(__dirname, '..', doc.file_path.replace(/^\/uploads\//, 'uploads/'));
+    absolute = path.join(ROOT_DIR, doc.file_path.replace(/^\/uploads\//, 'uploads/'));
   }
   res.setHeader('Content-Type', doc.mime_type || 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${doc.file_name}"`);
@@ -1200,6 +1232,9 @@ app.put('/api/documents/:id', (req, res) => {
   const actorId = (req.headers['x-user-id'] || '').toString();
   if (!['admin', 'operator'].includes(actorRole)) {
     return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const id = req.params.id;
   const before = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as any;
@@ -1244,6 +1279,9 @@ app.delete('/api/documents/:id', (req, res) => {
       return res.json({ ok: true });
     })();
     return;
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const before = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
   if (!before) return res.status(404).json({ error: 'Not found' });
@@ -1337,14 +1375,14 @@ app.post('/api/institutions/import-csv', upload.single('file'), (req, res) => {
 });
 
 // Cities endpoint for filters
-app.get('/api/cities', (req, res) => {
-  const cities = db.prepare('SELECT DISTINCT city FROM institutions ORDER BY city').all();
-  res.json(cities.map(c => c.city));
-});
+ 
 
 // Statistics
 app.get('/api/statistics', (req, res) => {
   try {
+    if (IS_VERCEL && !useSupabase) {
+      return res.status(500).json({ error: 'Supabase is not configured' });
+    }
     const stats = db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM institutions) AS total_institutions,
@@ -1370,6 +1408,9 @@ app.get('/api/audit-logs', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { limit = 100, offset = 0, resource_type, action, actor_role, search } = req.query as any;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const lim = Number(limit) || 100;
   const off = Number(offset) || 0;
   let q = 'SELECT * FROM audit_logs WHERE 1=1';
@@ -1390,6 +1431,9 @@ app.get('/api/audit-logs/export', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { format = 'csv', resource_type, action, actor_role, search } = req.query as any;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   let q = 'SELECT * FROM audit_logs WHERE 1=1';
   const p: any[] = [];
   if (resource_type) { q += ' AND resource_type = ?'; p.push(resource_type); }
@@ -1421,6 +1465,9 @@ app.get('/api/_debug/audit', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   try {
+    if (IS_VERCEL && !useSupabase) {
+      return res.status(500).json({ error: 'Supabase is not configured' });
+    }
     const master = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_logs'").get() as any;
     const count = db.prepare('SELECT COUNT(*) as c FROM audit_logs').get() as any;
     res.json({ schema: master?.sql || null, count: count?.c || 0 });
@@ -1435,6 +1482,9 @@ app.post('/api/_debug/audit-insert', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   try {
+    if (IS_VERCEL && !useSupabase) {
+      return res.status(500).json({ error: 'Supabase is not configured' });
+    }
     db.prepare('INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run('audit-' + Date.now(), 'user-001', 'admin', 'Administrator Sistema', 'debug', 'user', 'user-xyz', '["email"]', '{"email":"old"}', '{"email":"new"}');
     const count = db.prepare('SELECT COUNT(*) as c FROM audit_logs').get() as any;
@@ -1476,7 +1526,7 @@ app.get('/api/export/sql', (req, res) => {
   }
   const lines: string[] = [];
   lines.push('-- Schema');
-  lines.push(fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf-8'));
+  lines.push(fs.readFileSync(path.join(ROOT_DIR, 'supabase/schema.sql'), 'utf-8'));
   lines.push('\n-- Data\nBEGIN;');
   try {
     // institutions
@@ -1515,6 +1565,9 @@ app.get('/api/export/sql', (req, res) => {
 // Maintenance: normalize logo URLs to local assets to avoid external DNS issues
 app.post('/api/maintenance/fix-logos', (req, res) => {
   try {
+    if (IS_VERCEL && !useSupabase) {
+      return res.status(500).json({ error: 'Supabase is not configured' });
+    }
     const rows = db.prepare('SELECT id, name, logo_url FROM institutions').all() as Array<{ id: string; name: string; logo_url?: string }>;
     const update = db.prepare('UPDATE institutions SET logo_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
     let updated = 0;
@@ -1535,6 +1588,9 @@ app.post('/api/maintenance/fix-logos', (req, res) => {
 
 // Users
 app.get('/api/users', (req, res) => {
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const users = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users').all();
   res.json(users);
 });
@@ -1546,6 +1602,9 @@ app.post('/api/users', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { email, password, full_name, role, is_active = 1, institution_id = null } = req.body;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   if (!email || !password || !full_name) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -1587,6 +1646,9 @@ app.put('/api/users/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { email, full_name, role, is_active, institution_id } = req.body;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   if (role) {
     const allowedRoles = new Set(['admin', 'operator', 'viewer', 'institution']);
     if (!allowedRoles.has(role)) {
@@ -1629,6 +1691,9 @@ app.delete('/api/users/:id', (req, res) => {
   if (actorRole !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const before = db.prepare('SELECT id, email, full_name, role, is_active, institution_id, created_at FROM users WHERE id = ?').get(id);
   const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
   if (result.changes > 0) {
@@ -1649,3 +1714,6 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 export default app;
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
