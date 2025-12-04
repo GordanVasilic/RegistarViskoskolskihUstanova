@@ -53,11 +53,11 @@ const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUP
 const IS_VERCEL = !!process.env.VERCEL;
 const useSupabase = !!supabase;
 
-// Initialize SQLite database
-const db = new Database('registry.db');
+// Initialize SQLite database (disabled on Vercel)
+const db = IS_VERCEL ? null : new Database('registry.db');
 
 // Create tables
-db.exec(`
+if (db) db.exec(`
   CREATE TABLE IF NOT EXISTS institutions (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -151,6 +151,7 @@ db.exec(`
 
 // Migrations: add columns to institutions if missing
 function ensureColumn(table: string, column: string, typeClause: string) {
+  if (!db) return;
   const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   const exists = info.some(c => c.name === column);
   if (!exists) {
@@ -181,15 +182,18 @@ ensureColumn('institutions', 'fax', 'TEXT');
 ensureColumn('institutions', 'is_active', 'BOOLEAN DEFAULT 1');
 
 // Migrate old user roles
-try {
-  const roles = db.prepare(`SELECT DISTINCT role FROM users`).all() as Array<{ role: string }>;
-  const hasOldRole = roles.some(r => r.role === 'officer');
-  if (hasOldRole) {
-    db.prepare(`UPDATE users SET role = 'operator' WHERE role = 'officer'`).run();
-  }
-} catch {}
+if (db) {
+  try {
+    const roles = db.prepare(`SELECT DISTINCT role FROM users`).all() as Array<{ role: string }>;
+    const hasOldRole = roles.some(r => r.role === 'officer');
+    if (hasOldRole) {
+      db.prepare(`UPDATE users SET role = 'operator' WHERE role = 'officer'`).run();
+    }
+  } catch {}
+}
 
 // Rebuild users table to ensure updated CHECK constraint
+if (db) {
 try {
   db.prepare('BEGIN').run();
   db.exec(`
@@ -216,7 +220,9 @@ try {
 } catch (e) {
   try { db.prepare('ROLLBACK').run(); } catch {}
 }
+}
 
+if (db) {
 try {
   db.prepare('BEGIN').run();
   db.exec(`
@@ -252,12 +258,16 @@ try {
 } catch (e) {
   try { db.prepare('ROLLBACK').run(); } catch {}
 }
+}
 
 function actorNameById(id?: string) {
   if (!id) return null;
   try {
-    const u = db.prepare('SELECT full_name FROM users WHERE id = ?').get(id) as any;
-    return u?.full_name || null;
+    if (db) {
+      const u = db.prepare('SELECT full_name FROM users WHERE id = ?').get(id) as any;
+      return u?.full_name || null;
+    }
+    return null;
   } catch { return null; }
 }
 
@@ -279,8 +289,8 @@ function diffObject(prev: any, next: any, fields?: string[]) {
 }
 
 // Insert sample data
-const sampleData = db.prepare('SELECT COUNT(*) as count FROM institutions').get() as { count: number };
-if (true) {
+const sampleData = db ? (db.prepare('SELECT COUNT(*) as count FROM institutions').get() as { count: number }) : { count: 0 };
+if (db) {
   const institutions = [
     {
       id: 'inst-001',
