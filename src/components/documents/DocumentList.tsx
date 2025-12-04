@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Trash2, AlertTriangle } from 'lucide-react';
-import { api, DocumentRecord } from '@/services/api';
+import { api, DocumentRecord, API_BASE_URL } from '@/services/api';
 
 type Props = {
   association: { institution_id?: string; program_id?: string; process_id?: string };
@@ -51,7 +51,7 @@ export const DocumentList: React.FC<Props> = ({ association, refreshToken, reado
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{d.file_size ? `${(d.file_size/1024/1024).toFixed(2)} MB` : '-'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   <div className="flex space-x-2">
-                    <a href={`http://localhost:3001/api/documents/${d.id}/download`} className="text-blue-600 hover:text-blue-900 inline-flex items-center"><Download className="h-4 w-4" /></a>
+                     <a href={`${API_BASE_URL}/documents/${d.id}/download`} className="text-blue-600 hover:text-blue-900 inline-flex items-center"><Download className="h-4 w-4" /></a>
                     {!readonly && (
                       <button onClick={() => { setDocToDelete(d); setShowDeleteModal(true); }} className="text-red-600 hover:text-red-900 inline-flex items-center"><Trash2 className="h-4 w-4" /></button>
                     )}

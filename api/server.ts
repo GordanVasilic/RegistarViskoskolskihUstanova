@@ -5,6 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +45,12 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+// Supabase client
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const useSupabase = !!supabase;
 
 // Initialize SQLite database
 const db = new Database('registry.db');
@@ -510,32 +517,32 @@ app.get('/api/auth/me', (req, res) => {
 // Institutions
 app.get('/api/institutions', (req, res) => {
   const { search, city, accreditation_status, limit = 50, offset = 0 } = req.query as any;
-  
-  let query = 'SELECT * FROM institutions WHERE 1=1';
-  let params: any[] = [];
-  
-  if (search) {
-    query += ' AND (name LIKE ? OR city LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`);
+  if (useSupabase) {
+    (async () => {
+      let q = supabase!.from('institutions').select('*');
+      if (search) q = q.ilike('name', `%${search}%`);
+      if (city) q = q.eq('city', city);
+      if (accreditation_status) q = q.eq('accreditation_status', accreditation_status);
+      const lim = Number(limit) || 50;
+      const off = Number(offset) || 0;
+      const { data, error } = await q.order('name', { ascending: true }).range(off, off + lim - 1);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    })();
+    return;
   }
-  
-  if (city) {
-    query += ' AND city = ?';
-    params.push(city);
-  }
-  
-  if (accreditation_status) {
-    query += ' AND accreditation_status = ?';
-    params.push(accreditation_status);
-  }
-  
+  // SQLite fallback
   const lim = Number(limit) || 50;
   const off = Number(offset) || 0;
+  let query = 'SELECT * FROM institutions WHERE 1=1';
+  const params: any[] = [];
+  if (search) { query += ' AND (name LIKE ? OR city LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  if (city) { query += ' AND city = ?'; params.push(city); }
+  if (accreditation_status) { query += ' AND accreditation_status = ?'; params.push(accreditation_status); }
   query += ' ORDER BY name LIMIT ? OFFSET ?';
   params.push(lim, off);
-  
-  const institutions = db.prepare(query).all(...params);
-  res.json(institutions);
+  const rows = db.prepare(query).all(...params);
+  res.json(rows);
 });
 
 app.post('/api/institutions', (req, res) => {
@@ -545,19 +552,30 @@ app.post('/api/institutions', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active } = req.body;
+  if (useSupabase) {
+    (async () => {
+      const id = 'inst-' + Date.now();
+      const insertPayload = { id, name, address, city, phone: phone || '', email, website: website || '', institution_type, accreditation_status: accreditation_status || 'pending', logo_url: logo_url || '', ownership_type: ownership_type || null, founded_on: founded_on || null, accreditation_valid_from: accreditation_valid_from || null, accreditation_valid_to: accreditation_valid_to || null, competent_authority: competent_authority || null, notes: notes || null, registration_number: registration_number || null, tax_id: tax_id || null, short_name: short_name || null, municipality: municipality || null, postal_code: postal_code || null, country: country || 'Bosna i Hercegovina', founder_name: founder_name || null, founding_act_reference: founding_act_reference || null, head_name: head_name || null, head_title: head_title || null, fax: fax || null, is_active: (typeof is_active === 'boolean' ? (is_active ? 1 : 0) : (is_active === undefined ? 1 : (Number(is_active) ? 1 : 0))) };
+      const { data, error } = await supabase!.from('institutions').insert(insertPayload).select('*').single();
+      if (error) return res.status(500).json({ error: error.message });
+      const an = actorNameById(actorId);
+      const ch = Object.keys(req.body || {});
+      const payload = diffObject(null, req.body, ch);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'create', resource_type: 'institution', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: null, new_values: JSON.stringify(payload.nextOut) });
+      return res.json(data);
+    })();
+    return;
+  }
+  // SQLite fallback
   const id = 'inst-' + Date.now();
-  const stmt = db.prepare(`
-    INSERT INTO institutions (id, name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const stmt = db.prepare(`INSERT INTO institutions (id, name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(id, name, address, city, phone || '', email, website || '', institution_type, accreditation_status || 'pending', logo_url || '', ownership_type || null, founded_on || null, accreditation_valid_from || null, accreditation_valid_to || null, competent_authority || null, notes || null, registration_number || null, tax_id || null, short_name || null, municipality || null, postal_code || null, country || 'Bosna i Hercegovina', founder_name || null, founding_act_reference || null, head_name || null, head_title || null, fax || null, (typeof is_active === 'boolean' ? (is_active ? 1 : 0) : (is_active === undefined ? 1 : (Number(is_active) ? 1 : 0))));
   if (result.changes > 0) {
     const row = db.prepare('SELECT * FROM institutions WHERE id = ?').get(id);
     const an = actorNameById(actorId);
     const ch = Object.keys(req.body || {});
     const payload = diffObject(null, req.body, ch);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'institution', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'institution', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
     res.json(row);
   } else {
     res.status(500).json({ error: 'Failed to create institution' });
@@ -572,39 +590,25 @@ app.put('/api/institutions/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active } = req.body;
+  if (useSupabase) {
+    (async () => {
+      const { data: before } = await supabase!.from('institutions').select('*').eq('id', id).single();
+      const upd: any = { name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, is_active };
+      Object.keys(upd).forEach(k => { if (upd[k] === undefined) delete upd[k]; });
+      const { data, error } = await supabase!.from('institutions').update(upd).eq('id', id).select('*').single();
+      if (error) return res.status(404).json({ error: 'Institution not found' });
+      const an = actorNameById(actorId);
+      const fields = Object.keys(upd || {});
+      const payload = diffObject(before, data, fields);
+      if (payload.changed.length > 0) {
+        await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'update', resource_type: 'institution', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: JSON.stringify(payload.nextOut) });
+      }
+      return res.json(data);
+    })();
+    return;
+  }
   const before = db.prepare('SELECT * FROM institutions WHERE id = ?').get(id);
-  const stmt = db.prepare(`
-    UPDATE institutions SET
-      name = COALESCE(?, name),
-      address = COALESCE(?, address),
-      city = COALESCE(?, city),
-      phone = COALESCE(?, phone),
-      email = COALESCE(?, email),
-      website = COALESCE(?, website),
-      institution_type = COALESCE(?, institution_type),
-      accreditation_status = COALESCE(?, accreditation_status),
-      logo_url = COALESCE(?, logo_url),
-      ownership_type = COALESCE(?, ownership_type),
-      founded_on = COALESCE(?, founded_on),
-      accreditation_valid_from = COALESCE(?, accreditation_valid_from),
-      accreditation_valid_to = COALESCE(?, accreditation_valid_to),
-      competent_authority = COALESCE(?, competent_authority),
-      notes = COALESCE(?, notes),
-      registration_number = COALESCE(?, registration_number),
-      tax_id = COALESCE(?, tax_id),
-      short_name = COALESCE(?, short_name),
-      municipality = COALESCE(?, municipality),
-      postal_code = COALESCE(?, postal_code),
-      country = COALESCE(?, country),
-      founder_name = COALESCE(?, founder_name),
-      founding_act_reference = COALESCE(?, founding_act_reference),
-      head_name = COALESCE(?, head_name),
-      head_title = COALESCE(?, head_title),
-      fax = COALESCE(?, fax),
-      is_active = COALESCE(?, is_active),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
+  const stmt = db.prepare(`UPDATE institutions SET name = COALESCE(?, name), address = COALESCE(?, address), city = COALESCE(?, city), phone = COALESCE(?, phone), email = COALESCE(?, email), website = COALESCE(?, website), institution_type = COALESCE(?, institution_type), accreditation_status = COALESCE(?, accreditation_status), logo_url = COALESCE(?, logo_url), ownership_type = COALESCE(?, ownership_type), founded_on = COALESCE(?, founded_on), accreditation_valid_from = COALESCE(?, accreditation_valid_from), accreditation_valid_to = COALESCE(?, accreditation_valid_to), competent_authority = COALESCE(?, competent_authority), notes = COALESCE(?, notes), registration_number = COALESCE(?, registration_number), tax_id = COALESCE(?, tax_id), short_name = COALESCE(?, short_name), municipality = COALESCE(?, municipality), postal_code = COALESCE(?, postal_code), country = COALESCE(?, country), founder_name = COALESCE(?, founder_name), founding_act_reference = COALESCE(?, founding_act_reference), head_name = COALESCE(?, head_name), head_title = COALESCE(?, head_title), fax = COALESCE(?, fax), is_active = COALESCE(?, is_active), updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
   const result = stmt.run(name, address, city, phone, email, website, institution_type, accreditation_status, logo_url, ownership_type, founded_on, accreditation_valid_from, accreditation_valid_to, competent_authority, notes, registration_number, tax_id, short_name, municipality, postal_code, country, founder_name, founding_act_reference, head_name, head_title, fax, (typeof is_active === 'boolean' ? (is_active ? 1 : 0) : (is_active === undefined ? undefined : (Number(is_active) ? 1 : 0))), id);
   if (result.changes > 0) {
     const row = db.prepare('SELECT * FROM institutions WHERE id = ?').get(id);
@@ -612,8 +616,7 @@ app.put('/api/institutions/:id', (req, res) => {
     const fields = Object.keys(req.body || {});
     const payload = diffObject(before, row, fields);
     if (payload.changed.length > 0) {
-      db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run('audit-' + Date.now(), actorId, actorRole, an, 'update', 'institution', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), JSON.stringify(payload.nextOut));
+      db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'update', 'institution', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), JSON.stringify(payload.nextOut));
     }
     res.json(row);
   } else {
@@ -628,56 +631,65 @@ app.delete('/api/institutions/:id', (req, res) => {
   if (!['admin', 'operator'].includes(actorRole)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  if (useSupabase) {
+    (async () => {
+      const { data: before } = await supabase!.from('institutions').select('*').eq('id', id).single();
+      const { error } = await supabase!.from('institutions').delete().eq('id', id);
+      if (error) return res.json({ ok: false });
+      const an = actorNameById(actorId);
+      const payload = diffObject(before, null);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'delete', resource_type: 'institution', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: null });
+      return res.json({ ok: true });
+    })();
+    return;
+  }
   const before = db.prepare('SELECT * FROM institutions WHERE id = ?').get(id);
   const result = db.prepare('DELETE FROM institutions WHERE id = ?').run(id);
   if (result.changes > 0) {
     const an = actorNameById(actorId);
     const payload = diffObject(before, null);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'institution', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'institution', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
   }
   res.json({ ok: result.changes > 0 });
 });
 
 app.get('/api/institutions/:id', (req, res) => {
-  const institution = db.prepare('SELECT * FROM institutions WHERE id = ?').get(req.params.id);
-  
-  if (!institution) {
-    return res.status(404).json({ error: 'Institution not found' });
+  if (useSupabase) {
+    (async () => {
+      const { data: inst, error: e1 } = await supabase!.from('institutions').select('*').eq('id', req.params.id).single();
+      if (e1 || !inst) return res.status(404).json({ error: 'Institution not found' });
+      const { data: programs } = await supabase!.from('study_programs').select('*').eq('institution_id', req.params.id).order('name', { ascending: true });
+      return res.json({ ...inst, programs: programs || [] });
+    })();
+    return;
   }
-  
+  const institution = db.prepare('SELECT * FROM institutions WHERE id = ?').get(req.params.id);
+  if (!institution) return res.status(404).json({ error: 'Institution not found' });
   const programs = db.prepare('SELECT * FROM study_programs WHERE institution_id = ?').all(req.params.id);
-  
-  res.json({
-    ...institution,
-    programs
-  });
+  res.json({ ...institution, programs });
 });
 
 // Study Programs
 app.get('/api/study-programs', (req, res) => {
-  const { institution_id, degree_level, accreditation_status } = req.query;
-  
+  const { institution_id, degree_level, accreditation_status } = req.query as any;
+  if (useSupabase) {
+    (async () => {
+      let q = supabase!.from('study_programs').select('*');
+      if (institution_id) q = q.eq('institution_id', institution_id);
+      if (degree_level) q = q.eq('degree_level', degree_level);
+      if (accreditation_status) q = q.eq('accreditation_status', accreditation_status);
+      const { data, error } = await q.order('name', { ascending: true });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    })();
+    return;
+  }
   let query = 'SELECT * FROM study_programs WHERE 1=1';
-  let params: any[] = [];
-  
-  if (institution_id) {
-    query += ' AND institution_id = ?';
-    params.push(institution_id);
-  }
-  
-  if (degree_level) {
-    query += ' AND degree_level = ?';
-    params.push(degree_level);
-  }
-  
-  if (accreditation_status) {
-    query += ' AND accreditation_status = ?';
-    params.push(accreditation_status);
-  }
-  
+  const params: any[] = [];
+  if (institution_id) { query += ' AND institution_id = ?'; params.push(institution_id); }
+  if (degree_level) { query += ' AND degree_level = ?'; params.push(degree_level); }
+  if (accreditation_status) { query += ' AND accreditation_status = ?'; params.push(accreditation_status); }
   query += ' ORDER BY name';
-  
   const programs = db.prepare(query).all(...params);
   res.json(programs);
 });
@@ -689,19 +701,28 @@ app.post('/api/study-programs', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { institution_id, name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry } = req.body;
+  if (useSupabase) {
+    (async () => {
+      const id = 'prog-' + Date.now();
+      const { data, error } = await supabase!.from('study_programs').insert({ id, institution_id, name, degree_level, duration_years, ects_credits: ects_credits || null, accreditation_status: accreditation_status || 'pending', accreditation_expiry: accreditation_expiry || null }).select('*').single();
+      if (error) return res.status(500).json({ error: error.message });
+      const an = actorNameById(actorId);
+      const ch = Object.keys(req.body || {});
+      const payload = diffObject(null, req.body, ch);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'create', resource_type: 'study_program', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: null, new_values: JSON.stringify(payload.nextOut) });
+      return res.json(data);
+    })();
+    return;
+  }
   const id = 'prog-' + Date.now();
-  const stmt = db.prepare(`
-    INSERT INTO study_programs (id, institution_id, name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const stmt = db.prepare(`INSERT INTO study_programs (id, institution_id, name, degree_level, duration_years, ects_credits, accreditation_status, accreditation_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(id, institution_id, name, degree_level, duration_years, ects_credits || null, accreditation_status || 'pending', accreditation_expiry || null);
   if (result.changes > 0) {
     const row = db.prepare('SELECT * FROM study_programs WHERE id = ?').get(id);
     const an = actorNameById(actorId);
     const ch = Object.keys(req.body || {});
     const payload = diffObject(null, req.body, ch);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'study_program', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'study_program', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
     res.json(row);
   } else {
     res.status(500).json({ error: 'Failed to create study program' });
@@ -751,41 +772,49 @@ app.delete('/api/study-programs/:id', (req, res) => {
   if (!['admin', 'operator'].includes(actorRole)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  if (useSupabase) {
+    (async () => {
+      const { data: before } = await supabase!.from('study_programs').select('*').eq('id', id).single();
+      const { error } = await supabase!.from('study_programs').delete().eq('id', id);
+      if (error) return res.json({ ok: false });
+      const an = actorNameById(actorId);
+      const payload = diffObject(before, null);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'delete', resource_type: 'study_program', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: null });
+      return res.json({ ok: true });
+    })();
+    return;
+  }
   const before = db.prepare('SELECT * FROM study_programs WHERE id = ?').get(id);
   const result = db.prepare('DELETE FROM study_programs WHERE id = ?').run(id);
   if (result.changes > 0) {
     const an = actorNameById(actorId);
     const payload = diffObject(before, null);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'study_program', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'study_program', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
   }
   res.json({ ok: result.changes > 0 });
 });
 
 // Accreditation Processes
 app.get('/api/accreditation-processes', (req, res) => {
-  const { institution_id, status, assigned_officer_id } = req.query;
-  
+  const { institution_id, status, assigned_officer_id } = req.query as any;
+  if (useSupabase) {
+    (async () => {
+      let q = supabase!.from('accreditation_processes').select('*');
+      if (institution_id) q = q.eq('institution_id', institution_id);
+      if (status) q = q.eq('status', status);
+      if (assigned_officer_id) q = q.eq('assigned_officer_id', assigned_officer_id);
+      const { data, error } = await q.order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    })();
+    return;
+  }
   let query = 'SELECT * FROM accreditation_processes WHERE 1=1';
-  let params: any[] = [];
-  
-  if (institution_id) {
-    query += ' AND institution_id = ?';
-    params.push(institution_id);
-  }
-  
-  if (status) {
-    query += ' AND status = ?';
-    params.push(status);
-  }
-  
-  if (assigned_officer_id) {
-    query += ' AND assigned_officer_id = ?';
-    params.push(assigned_officer_id);
-  }
-  
+  const params: any[] = [];
+  if (institution_id) { query += ' AND institution_id = ?'; params.push(institution_id); }
+  if (status) { query += ' AND status = ?'; params.push(status); }
+  if (assigned_officer_id) { query += ' AND assigned_officer_id = ?'; params.push(assigned_officer_id); }
   query += ' ORDER BY created_at DESC';
-  
   const processes = db.prepare(query).all(...params);
   res.json(processes);
 });
@@ -800,28 +829,39 @@ app.post('/api/accreditation-processes', (req, res) => {
   if (!institution_id || !process_type || !application_date) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
+  if (useSupabase) {
+    (async () => {
+      if (program_id) {
+        const { data: prog } = await supabase!.from('study_programs').select('institution_id').eq('id', program_id).single();
+        if (!prog || prog.institution_id !== institution_id) return res.status(400).json({ error: 'Program does not belong to institution' });
+      }
+      const id = 'proc-' + Date.now();
+      const status = 'submitted';
+      const { data, error } = await supabase!.from('accreditation_processes').insert({ id, institution_id, program_id: program_id || null, process_type, status, application_date, notes }).select('*').single();
+      if (error) return res.status(500).json({ error: error.message });
+      const an = actorNameById(actorId);
+      const ch = Object.keys(req.body || {});
+      const payload = diffObject(null, req.body, ch);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'create', resource_type: 'accreditation_process', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: null, new_values: JSON.stringify(payload.nextOut) });
+      return res.json(data);
+    })();
+    return;
+  }
   if (program_id) {
     const prog = db.prepare('SELECT institution_id FROM study_programs WHERE id = ?').get(program_id) as any;
     if (!prog || prog.institution_id !== institution_id) {
       return res.status(400).json({ error: 'Program does not belong to institution' });
     }
   }
-  
   const id = 'proc-' + Date.now();
   const status = 'submitted';
-  
-  const result = db.prepare(`
-    INSERT INTO accreditation_processes (id, institution_id, program_id, process_type, status, application_date, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, institution_id, program_id || null, process_type, status, application_date, notes);
-  
+  const result = db.prepare(`INSERT INTO accreditation_processes (id, institution_id, program_id, process_type, status, application_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, institution_id, program_id || null, process_type, status, application_date, notes);
   if (result.changes > 0) {
     const newProcess = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id);
     const an = actorNameById(actorId);
     const ch = Object.keys(req.body || {});
     const payload = diffObject(null, req.body, ch);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'accreditation_process', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'accreditation_process', id, JSON.stringify(payload.changed), null, JSON.stringify(payload.nextOut));
     res.json(newProcess);
   } else {
     res.status(500).json({ error: 'Failed to create accreditation process' });
@@ -893,16 +933,26 @@ app.delete('/api/accreditation-processes/:id', (req, res) => {
   if (!['admin', 'operator'].includes(actorRole)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  const before = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id);
-  if (!before) {
-    return res.status(404).json({ error: 'Process not found' });
+  if (useSupabase) {
+    (async () => {
+      const { data: before } = await supabase!.from('accreditation_processes').select('*').eq('id', id).single();
+      if (!before) return res.status(404).json({ error: 'Process not found' });
+      const { error } = await supabase!.from('accreditation_processes').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: 'Failed to delete process' });
+      const an = actorNameById(actorId);
+      const payload = diffObject(before, null);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'delete', resource_type: 'accreditation_process', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: null });
+      return res.json({ ok: true });
+    })();
+    return;
   }
+  const before = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id);
+  if (!before) return res.status(404).json({ error: 'Process not found' });
   const result = db.prepare('DELETE FROM accreditation_processes WHERE id = ?').run(id);
   if (result.changes > 0) {
     const an = actorNameById(actorId);
     const payload = diffObject(before, null);
-    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'accreditation_process', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
+    db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'delete', 'accreditation_process', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), null);
     res.json({ ok: true });
   } else {
     res.status(500).json({ error: 'Failed to delete process' });
@@ -977,50 +1027,89 @@ app.post('/api/documents/upload', upload.single('file'), (req, res) => {
   const safeBase = sanitizeName(origBase);
   const typePart = sanitizeName(String(document_type));
   let finalName = `${dateStr}_${typePart}_${safeBase}.pdf`;
+  let version = 1;
+  let fileUrl = '';
+  let sha256: string | null = null;
+
+  if (useSupabase) {
+    (async () => {
+      // Upload to Supabase storage (bucket: documents)
+      const bucket = 'documents';
+      // ensure unique name by probing public URL
+      let idx = 1;
+      let key = `${instId}/${finalName}`;
+      while (true) {
+        const probe = supabase!.storage.from(bucket).getPublicUrl(key);
+        if (!probe.data?.publicUrl) break;
+        // Try a different name
+        idx++;
+        version = idx;
+        finalName = `${dateStr}_${typePart}_${safeBase}_v${idx}.pdf`;
+        key = `${instId}/${finalName}`;
+        if (idx > 100) break;
+      }
+      const buffer = fs.readFileSync(req.file.path);
+      const { error: upErr } = await supabase!.storage.from(bucket).upload(key, buffer, { contentType: 'application/pdf', upsert: false });
+      try { fs.unlinkSync(req.file.path); } catch {}
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      const pub = supabase!.storage.from(bucket).getPublicUrl(key);
+      fileUrl = pub.data?.publicUrl || '';
+      try { const hash = crypto.createHash('sha256'); hash.update(buffer); sha256 = hash.digest('hex'); } catch {}
+      const id = 'doc-' + Date.now();
+      const { error: insErr } = await supabase!.from('documents').insert({ id, institution_id: instId, program_id: program_id || null, process_id: process_id || null, document_type, title: title || null, description: description || null, issuer: issuer || null, issued_at: issued_at || null, number: number || null, file_name: finalName, file_path: fileUrl, file_size: req.file.size, mime_type: mime, sha256: sha256 || null, version, is_confidential: is_confidential ? 1 : 0, tags: tags || null, uploaded_by: actorId || null });
+      if (insErr) return res.status(500).json({ error: insErr.message });
+      const an = actorNameById(actorId);
+      const payload = { changed: ['create'], prevOut: null, nextOut: { id, institution_id: instId, program_id, process_id, document_type, title, issuer, number, file_path: fileUrl, version } };
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'create', resource_type: 'document', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: JSON.stringify(payload.nextOut) });
+      return res.json({ id, file_url: fileUrl });
+    })();
+    return;
+  }
+  // SQLite/local storage fallback
   const targetDir = path.join(storageRoot, instId);
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   let finalPath = path.join(targetDir, finalName);
-  let version = 1;
   if (fs.existsSync(finalPath)) {
     version = 2;
-    let idx = 2;
+    let idx2 = 2;
     while (fs.existsSync(finalPath)) {
-      finalName = `${dateStr}_${typePart}_${safeBase}_v${idx}.pdf`;
+      finalName = `${dateStr}_${typePart}_${safeBase}_v${idx2}.pdf`;
       finalPath = path.join(targetDir, finalName);
-      version = idx;
-      idx++;
+      version = idx2;
+      idx2++;
     }
   }
-  try {
-    fs.renameSync(req.file.path, finalPath);
-  } catch (e) {
-    return res.status(500).json({ error: 'Failed to store file' });
-  }
-
-  let sha256: string | null = null;
-  try {
-    const hash = crypto.createHash('sha256');
-    const data = fs.readFileSync(finalPath);
-    hash.update(data);
-    sha256 = hash.digest('hex');
-  } catch {}
-
+  try { fs.renameSync(req.file.path, finalPath); } catch (e) { return res.status(500).json({ error: 'Failed to store file' }); }
+  try { const hash = crypto.createHash('sha256'); const data = fs.readFileSync(finalPath); hash.update(data); sha256 = hash.digest('hex'); } catch {}
   const id = 'doc-' + Date.now();
   const relPath = `/storage/app/files/${instId}/${finalName}`;
-  const stmt = db.prepare(`INSERT INTO documents (id, institution_id, program_id, process_id, document_type, title, description, issuer, issued_at, number, file_name, file_path, file_size, mime_type, sha256, version, is_confidential, tags, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO documents (id, institution_id, program_id, process_id, document_type, title, description, issuer, issued_at, number, file_name, file_path, file_size, mime_type, sha256, version, is_confidential, tags, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   stmt.run(id, instId, program_id || null, process_id || null, document_type, title || null, description || null, issuer || null, issued_at || null, number || null, finalName, relPath, req.file.size, mime, sha256 || null, version, is_confidential ? 1 : 0, tags || null, actorId || null);
-
   const an = actorNameById(actorId);
   const payload = { changed: ['create'], prevOut: null, nextOut: { id, institution_id: instId, program_id, process_id, document_type, title, issuer, number, file_path: relPath, version } };
   db.prepare(`INSERT INTO audit_logs (id, actor_id, actor_role, actor_name, action, resource_type, resource_id, changed_fields, prev_values, new_values) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('audit-' + Date.now(), actorId, actorRole, an, 'create', 'document', id, JSON.stringify(payload.changed), JSON.stringify(payload.prevOut), JSON.stringify(payload.nextOut));
-
   res.json({ id, file_url: relPath });
 });
 
 // Documents: List
 app.get('/api/documents', (req, res) => {
   const { institution_id, program_id, process_id, type, search, date_from, date_to, limit = 50, offset = 0 } = req.query as any;
+  if (useSupabase) {
+    (async () => {
+      let q = supabase!.from('documents').select('*');
+      if (institution_id) q = q.eq('institution_id', institution_id);
+      if (program_id) q = q.eq('program_id', program_id);
+      if (process_id) q = q.eq('process_id', process_id);
+      if (type) q = q.eq('document_type', type);
+      if (search) q = q.or(`title.ilike.%${search}%,description.ilike.%${search}%,number.ilike.%${search}%`);
+      const lim = Number(limit) || 50;
+      const off = Number(offset) || 0;
+      const { data, error } = await q.order('uploaded_at', { ascending: false }).range(off, off + lim - 1);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    })();
+    return;
+  }
   const where: string[] = [];
   const params: any[] = [];
   if (institution_id) { where.push('institution_id = ?'); params.push(institution_id); }
@@ -1039,6 +1128,15 @@ app.get('/api/documents', (req, res) => {
 // Documents: Download
 app.get('/api/documents/:id/download', (req, res) => {
   const id = req.params.id;
+  if (useSupabase) {
+    (async () => {
+      const { data: doc, error } = await supabase!.from('documents').select('file_name,file_path,mime_type').eq('id', id).single();
+      if (error || !doc) return res.status(404).json({ error: 'Not found' });
+      // file_path assumed to be public URL
+      return res.redirect(String(doc.file_path));
+    })();
+    return;
+  }
   const doc = db.prepare('SELECT file_name, file_path, mime_type FROM documents WHERE id = ?').get(id) as any;
   if (!doc) return res.status(404).json({ error: 'Not found' });
   let absolute: string;
@@ -1080,6 +1178,29 @@ app.delete('/api/documents/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const id = req.params.id;
+  if (useSupabase) {
+    (async () => {
+      const { data: before } = await supabase!.from('documents').select('*').eq('id', id).single();
+      if (!before) return res.status(404).json({ error: 'Not found' });
+      // If stored in Supabase storage, try to remove
+      try {
+        const url: string = String(before.file_path || '');
+        const bucket = 'documents';
+        const match = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.*)$/);
+        if (match) {
+          const key = match[2];
+          await supabase!.storage.from(bucket).remove([key]);
+        }
+      } catch {}
+      const { error } = await supabase!.from('documents').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: 'Failed to delete' });
+      const an = actorNameById(actorId);
+      const payload = diffObject(before, null);
+      await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: an, action: 'delete', resource_type: 'document', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: JSON.stringify(payload.nextOut) });
+      return res.json({ ok: true });
+    })();
+    return;
+  }
   const before = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
   if (!before) return res.status(404).json({ error: 'Not found' });
   let abs: string;
@@ -1277,6 +1398,74 @@ app.post('/api/_debug/audit-insert', (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: 'Debug insert failed' });
   }
+});
+
+// Setup: create storage bucket 'documents' (public)
+app.post('/api/_setup/storage', async (req, res) => {
+  try {
+    if (!useSupabase || !supabase) return res.status(400).json({ error: 'Supabase is not configured' });
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const exists = (buckets || []).some(b => b.name === 'documents');
+    if (!exists) {
+      const { error } = await supabase.storage.createBucket('documents', { public: true });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ created: true });
+    }
+    return res.json({ created: false, message: 'Bucket already exists' });
+  } catch (e: any) {
+    return res.status(500).json({ error: 'Bucket setup failed' });
+  }
+});
+
+// Export current database as SQL (compatible with Supabase schema)
+app.get('/api/export/sql', (req, res) => {
+  function esc(v: any) {
+    if (v === null || v === undefined) return 'NULL';
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    const s = String(v);
+    return "'" + s.replace(/'/g, "''") + "'";
+  }
+  function insertStmt(table: string, cols: string[], row: any) {
+    const values = cols.map(c => esc((row as any)[c]));
+    return `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${values.join(', ')});`;
+  }
+  const lines: string[] = [];
+  lines.push('-- Schema');
+  lines.push(fs.readFileSync(path.join(__dirname, '../supabase/schema.sql'), 'utf-8'));
+  lines.push('\n-- Data\nBEGIN;');
+  try {
+    // institutions
+    const instCols = ['id','name','address','city','phone','email','website','institution_type','accreditation_status','logo_url','ownership_type','founded_on','accreditation_valid_from','accreditation_valid_to','competent_authority','notes','registration_number','tax_id','short_name','municipality','postal_code','country','founder_name','founding_act_reference','head_name','head_title','fax','is_active','created_at','updated_at'];
+    const institutions = db.prepare('SELECT ' + instCols.join(',') + ' FROM institutions').all() as any[];
+    institutions.forEach(r => lines.push(insertStmt('public.institutions', instCols, r)));
+    // study_programs
+    const spCols = ['id','institution_id','name','degree_level','duration_years','ects_credits','accreditation_status','accreditation_expiry','created_at','updated_at'];
+    const programs = db.prepare('SELECT ' + spCols.join(',') + ' FROM study_programs').all() as any[];
+    programs.forEach(r => lines.push(insertStmt('public.study_programs', spCols, r)));
+    // accreditation_processes
+    const apCols = ['id','institution_id','program_id','assigned_officer_id','process_type','status','application_date','decision_date','decision','notes','created_at','updated_at'];
+    const processes = db.prepare('SELECT ' + apCols.join(',') + ' FROM accreditation_processes').all() as any[];
+    processes.forEach(r => lines.push(insertStmt('public.accreditation_processes', apCols, r)));
+    // documents
+    const docCols = ['id','institution_id','program_id','process_id','document_type','title','description','issuer','issued_at','number','file_name','file_path','file_size','mime_type','sha256','version','is_confidential','tags','uploaded_by','uploaded_at'];
+    const documents = db.prepare('SELECT ' + docCols.join(',') + ' FROM documents').all() as any[];
+    documents.forEach(r => lines.push(insertStmt('public.documents', docCols, r)));
+    // users
+    const userCols = ['id','email','password','full_name','role','is_active','institution_id','created_at'];
+    const users = db.prepare('SELECT ' + userCols.join(',') + ' FROM users').all() as any[];
+    users.forEach(r => lines.push(insertStmt('public.users', userCols, r)));
+    // audit_logs
+    const alCols = ['id','actor_id','actor_role','actor_name','action','resource_type','resource_id','changed_fields','prev_values','new_values','created_at'];
+    const logs = db.prepare('SELECT ' + alCols.join(',') + ' FROM audit_logs').all() as any[];
+    logs.forEach(r => lines.push(insertStmt('public.audit_logs', alCols, r)));
+  } catch (e: any) {
+    lines.push('-- Export error: ' + String(e?.message || e));
+  }
+  lines.push('COMMIT;');
+  const sql = lines.join('\n');
+  res.setHeader('Content-Type', 'application/sql');
+  res.send(sql);
 });
 
 // Maintenance: normalize logo URLs to local assets to avoid external DNS issues
