@@ -138,7 +138,12 @@ class ApiService {
       }
       throw new Error(`API Error: ${response.status} ${response.statusText}${detail}`);
     }
-    return response.json();
+    const ct = response.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      return response.json();
+    }
+    const text = await response.text();
+    throw new Error(`API Error: Unexpected non-JSON response (${response.status}): ${text.slice(0, 200)}`);
   }
 
   // Authentication
