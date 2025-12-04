@@ -65,7 +65,7 @@ const InstitutionPortal: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
+      case 'accredited': return 'bg-green-100 text-green-800';
       case 'pending': return 'bg-yellow-100 text-yellow-800';
       case 'expired': return 'bg-red-100 text-red-800';
       case 'suspended': return 'bg-gray-100 text-gray-800';
@@ -126,7 +126,7 @@ const InstitutionPortal: React.FC = () => {
             </div>
             <div>
               <p className="text-sm font-medium text-gray-500">Tip</p>
-              <p className="text-base text-gray-900 capitalize">{institution.type}</p>
+              <p className="text-base text-gray-900 capitalize">{institution.institution_type}</p>
             </div>
             <div>
               <p className="text-sm font-medium text-gray-500">Grad</p>
@@ -147,17 +147,17 @@ const InstitutionPortal: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-500">Status akreditacije</p>
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(institution.accreditation_status)}`}>
-                {institution.accreditation_status === 'active' && 'Aktivna'}
-                {institution.accreditation_status === 'pending' && 'Na čekanju'}
+                {institution.accreditation_status === 'accredited' && 'Akreditirana'}
+                {institution.accreditation_status === 'pending' && 'U procesu'}
                 {institution.accreditation_status === 'expired' && 'Istekla'}
                 {institution.accreditation_status === 'suspended' && 'Suspendovana'}
               </span>
             </div>
-            {institution.accreditation_expires_at && (
+            {institution.accreditation_valid_to && (
               <div>
                 <p className="text-sm font-medium text-gray-500">Ističe</p>
                 <p className="text-base text-gray-900">
-                  {new Date(institution.accreditation_expires_at).toLocaleDateString('bs-BA')}
+                  {new Date(institution.accreditation_valid_to).toLocaleDateString('bs-BA')}
                 </p>
               </div>
             )}
@@ -244,19 +244,19 @@ const InstitutionPortal: React.FC = () => {
                   <div className="text-sm font-medium text-gray-900">{program.name}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-500 capitalize">{program.level}</div>
+                  <div className="text-sm text-gray-500 capitalize">{program.degree_level}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-500">{program.duration}</div>
+                  <div className="text-sm text-gray-500">{program.duration_years}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-500">{program.ects}</div>
+                  <div className="text-sm text-gray-500">{program.ects_credits}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(program.status)}`}>
-                    {program.status === 'active' && 'Aktivan'}
-                    {program.status === 'pending' && 'Na čekanju'}
-                    {program.status === 'expired' && 'Istekao'}
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(program.accreditation_status)}`}>
+                    {program.accreditation_status === 'accredited' && 'Akreditiran'}
+                    {program.accreditation_status === 'pending' && 'U procesu'}
+                    {program.accreditation_status === 'expired' && 'Istekao'}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -319,8 +319,8 @@ const InstitutionPortal: React.FC = () => {
               <tr key={process.id}>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm font-medium text-gray-900 capitalize">
-                    {process.type === 'initial' ? 'Inicijalna' : 
-                     process.type === 'renewal' ? 'Obnova' : 'Izmena'}
+                    {process.process_type === 'initial' ? 'Inicijalna' : 
+                     process.process_type === 'renewal' ? 'Obnova' : 'Ponovna evaluacija'}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">

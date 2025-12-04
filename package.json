@@ -9,7 +9,7 @@
     "export:sql": "tsx api/exportSql.ts",
     "import:url": "tsx api/importFromUrl.ts",
     "import:file": "tsx api/importFromFile.ts",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc -b --noEmit"

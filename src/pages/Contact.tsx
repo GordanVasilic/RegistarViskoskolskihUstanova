@@ -17,7 +17,7 @@ const Contact: React.FC = () => {
     setFormData({ name: '', email: '', subject: '', message: '', category: 'general' });
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value

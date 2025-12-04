@@ -663,7 +663,7 @@ app.get('/api/institutions/:id', (req, res) => {
     })();
     return;
   }
-  const institution = db.prepare('SELECT * FROM institutions WHERE id = ?').get(req.params.id);
+  const institution = db.prepare('SELECT * FROM institutions WHERE id = ?').get(req.params.id) as any;
   if (!institution) return res.status(404).json({ error: 'Institution not found' });
   const programs = db.prepare('SELECT * FROM study_programs WHERE institution_id = ?').all(req.params.id);
   res.json({ ...institution, programs });
@@ -876,7 +876,7 @@ app.put('/api/accreditation-processes/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { status, assigned_officer_id, decision, decision_date, notes, program_id } = req.body;
-  const before = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id);
+  const before = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id) as any;
   if (program_id) {
     const prog = db.prepare('SELECT institution_id FROM study_programs WHERE id = ?').get(program_id) as any;
     if (!prog || prog.institution_id !== before?.institution_id) {
@@ -896,7 +896,7 @@ app.put('/api/accreditation-processes/:id', (req, res) => {
   `);
   const result = stmt.run(status, assigned_officer_id, decision, decision_date, notes, program_id, id);
   if (result.changes > 0) {
-    const row = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id);
+    const row = db.prepare('SELECT * FROM accreditation_processes WHERE id = ?').get(id) as any;
     const an = actorNameById(actorId);
     const fields = Object.keys(req.body || {});
     const payload = diffObject(before, row, fields);
@@ -1158,7 +1158,7 @@ app.put('/api/documents/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const id = req.params.id;
-  const before = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+  const before = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as any;
   if (!before) return res.status(404).json({ error: 'Not found' });
   const { document_type, title, description, issuer, issued_at, number, is_confidential, tags } = req.body;
   const stmt = db.prepare(`UPDATE documents SET document_type = COALESCE(?, document_type), title = COALESCE(?, title), description = COALESCE(?, description), issuer = COALESCE(?, issuer), issued_at = COALESCE(?, issued_at), number = COALESCE(?, number), is_confidential = COALESCE(?, is_confidential), tags = COALESCE(?, tags), uploaded_at = uploaded_at WHERE id = ?`);
