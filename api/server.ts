@@ -50,7 +50,7 @@ const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUP
 const FORCE_SQLITE = String(process.env.USE_SQLITE || '').toLowerCase() === '1' || String(process.env.USE_SQLITE || '').toLowerCase() === 'true';
 const useSupabase = !!supabase && !FORCE_SQLITE;
 
-const db = null;
+const db: any = null as any;
 
 // Create tables
  
@@ -646,6 +646,7 @@ app.post('/api/documents/upload', upload.single('file'), (req, res) => {
   }
   const { institution_id, program_id, process_id, document_type, title, description, issuer, issued_at, number, is_confidential, tags } = req.body;
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const file = req.file as any;
   if (!document_type) return res.status(400).json({ error: 'document_type is required' });
   if (!(institution_id || program_id || process_id)) return res.status(400).json({ error: 'association id required' });
   const mime = req.file.mimetype;
@@ -692,15 +693,15 @@ app.post('/api/documents/upload', upload.single('file'), (req, res) => {
         key = `${instId}/${finalName}`;
         if (idx > 100) break;
       }
-      const buffer = fs.readFileSync(req.file.path);
+      const buffer = fs.readFileSync(file.path);
       const { error: upErr } = await supabase!.storage.from(bucket).upload(key, buffer, { contentType: 'application/pdf', upsert: false });
-      try { fs.unlinkSync(req.file.path); } catch {}
+      try { fs.unlinkSync(file.path); } catch {}
       if (upErr) return res.status(500).json({ error: upErr.message });
       const pub = supabase!.storage.from(bucket).getPublicUrl(key);
       fileUrl = pub.data?.publicUrl || '';
       try { const hash = crypto.createHash('sha256'); hash.update(buffer); sha256 = hash.digest('hex'); } catch {}
       const id = 'doc-' + Date.now();
-      const { error: insErr } = await supabase!.from('documents').insert({ id, institution_id: instId, program_id: program_id || null, process_id: process_id || null, document_type, title: title || null, description: description || null, issuer: issuer || null, issued_at: issued_at || null, number: number || null, file_name: finalName, file_path: fileUrl, file_size: req.file.size, mime_type: mime, sha256: sha256 || null, version, is_confidential: is_confidential ? 1 : 0, tags: tags || null, uploaded_by: actorId || null });
+      const { error: insErr } = await supabase!.from('documents').insert({ id, institution_id: instId, program_id: program_id || null, process_id: process_id || null, document_type, title: title || null, description: description || null, issuer: issuer || null, issued_at: issued_at || null, number: number || null, file_name: finalName, file_path: fileUrl, file_size: file.size, mime_type: mime, sha256: sha256 || null, version, is_confidential: is_confidential ? 1 : 0, tags: tags || null, uploaded_by: actorId || null });
       if (insErr) return res.status(500).json({ error: insErr.message });
       const an = actorNameById(actorId);
       const payload = { changed: ['create'], prevOut: null, nextOut: { id, institution_id: instId, program_id, process_id, document_type, title, issuer, number, file_path: fileUrl, version } };
