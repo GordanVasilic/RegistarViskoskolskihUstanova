@@ -50,6 +50,7 @@ const upload = multer({ storage });
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const IS_VERCEL = !!process.env.VERCEL;
 const useSupabase = !!supabase;
 
 // Initialize SQLite database
@@ -531,7 +532,10 @@ app.get('/api/institutions', (req, res) => {
     })();
     return;
   }
-  // SQLite fallback
+  // SQLite fallback (not supported on Vercel)
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   const lim = Number(limit) || 50;
   const off = Number(offset) || 0;
   let query = 'SELECT * FROM institutions WHERE 1=1';
@@ -684,6 +688,9 @@ app.get('/api/study-programs', (req, res) => {
     })();
     return;
   }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
+  }
   let query = 'SELECT * FROM study_programs WHERE 1=1';
   const params: any[] = [];
   if (institution_id) { query += ' AND institution_id = ?'; params.push(institution_id); }
@@ -808,6 +815,9 @@ app.get('/api/accreditation-processes', (req, res) => {
       return res.json(data || []);
     })();
     return;
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   let query = 'SELECT * FROM accreditation_processes WHERE 1=1';
   const params: any[] = [];
@@ -1109,6 +1119,9 @@ app.get('/api/documents', (req, res) => {
       return res.json(data || []);
     })();
     return;
+  }
+  if (IS_VERCEL && !useSupabase) {
+    return res.status(500).json({ error: 'Supabase is not configured' });
   }
   const where: string[] = [];
   const params: any[] = [];
@@ -1638,3 +1651,12 @@ ensureColumn('documents', 'sha256', 'TEXT');
 ensureColumn('documents', 'version', 'INTEGER DEFAULT 1');
 ensureColumn('documents', 'is_confidential', 'BOOLEAN DEFAULT 0');
 ensureColumn('documents', 'tags', 'TEXT');
+// Auth (demo)
+app.get('/api/auth/me', (req, res) => {
+  const uid = String(req.headers['x-user-id'] || '').trim();
+  const role = String(req.headers['x-user-role'] || '').trim();
+  if (uid && role) {
+    return res.json({ user: { id: uid, email: '', full_name: '', role, is_active: true, created_at: new Date().toISOString() } });
+  }
+  return res.json({ user: null });
+});
