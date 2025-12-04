@@ -1,4 +1,8 @@
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || (typeof window !== 'undefined' ? '/api' : 'http://localhost:3001/api');
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL;
+const SUPABASE_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
+const supabase: SupabaseClient | null = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 export interface Institution {
   id: string;
@@ -175,11 +179,27 @@ class ApiService {
         }
       });
     }
-    
+    if (supabase) {
+      let q = supabase.from('institutions').select('*');
+      if (params?.search) q = q.ilike('name', `%${params.search}%`);
+      if (params?.city) q = q.eq('city', params.city);
+      if (params?.accreditation_status) q = q.eq('accreditation_status', params.accreditation_status);
+      const lim = Number(params?.limit || 50);
+      const off = Number(params?.offset || 0);
+      const { data, error } = await q.order('name', { ascending: true }).range(off, off + lim - 1);
+      if (error) throw new Error(error.message);
+      return (data || []) as any;
+    }
     return this.fetchWithError(`${API_BASE_URL}/institutions?${searchParams}`);
   }
 
   async getInstitution(id: string): Promise<Institution> {
+    if (supabase) {
+      const { data: inst, error: e1 } = await supabase.from('institutions').select('*').eq('id', id).single();
+      if (e1 || !inst) throw new Error(e1?.message || 'Not found');
+      const { data: programs } = await supabase.from('study_programs').select('*').eq('institution_id', id).order('name', { ascending: true });
+      return { ...(inst as any), programs: programs || [] } as any;
+    }
     return this.fetchWithError(`${API_BASE_URL}/institutions/${id}`);
   }
 
@@ -217,7 +237,15 @@ class ApiService {
         }
       });
     }
-    
+    if (supabase) {
+      let q = supabase.from('study_programs').select('*');
+      if (params?.institution_id) q = q.eq('institution_id', params.institution_id);
+      if (params?.degree_level) q = q.eq('degree_level', params.degree_level);
+      if (params?.accreditation_status) q = q.eq('accreditation_status', params.accreditation_status);
+      const { data, error } = await q.order('name', { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data || []) as any;
+    }
     return this.fetchWithError(`${API_BASE_URL}/study-programs?${searchParams}`);
   }
 
@@ -255,7 +283,15 @@ class ApiService {
         }
       });
     }
-    
+    if (supabase) {
+      let q = supabase.from('accreditation_processes').select('*');
+      if (params?.institution_id) q = q.eq('institution_id', params.institution_id);
+      if (params?.status) q = q.eq('status', params.status);
+      if (params?.assigned_officer_id) q = q.eq('assigned_officer_id', params.assigned_officer_id);
+      const { data, error } = await q.order('created_at', { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data || []) as any;
+    }
     return this.fetchWithError(`${API_BASE_URL}/accreditation-processes?${searchParams}`);
   }
 
@@ -289,6 +325,13 @@ class ApiService {
 
   // Cities
   async getCities(): Promise<string[]> {
+    if (supabase) {
+      const { data, error } = await supabase.from('institutions').select('city');
+      if (error) throw new Error(error.message);
+      const set = new Set<string>();
+      (data || []).forEach((r: any) => { const c = String(r.city || '').trim(); if (c) set.add(c); });
+      return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }
     return this.fetchWithError(`${API_BASE_URL}/cities`);
   }
 
@@ -338,6 +381,18 @@ class ApiService {
   }
 
   async getDocuments(params?: { institution_id?: string; program_id?: string; process_id?: string; type?: string; search?: string; date_from?: string; date_to?: string; limit?: number; offset?: number }): Promise<DocumentRecord[]> {
+    if (supabase) {
+      let q = supabase.from('documents').select('*');
+      if (params?.institution_id) q = q.eq('institution_id', params.institution_id);
+      if (params?.program_id) q = q.eq('program_id', params.program_id);
+      if (params?.process_id) q = q.eq('process_id', params.process_id);
+      if (params?.type) q = q.eq('document_type', params.type);
+      const lim = Number(params?.limit || 50);
+      const off = Number(params?.offset || 0);
+      const { data, error } = await q.order('uploaded_at', { ascending: false }).range(off, off + lim - 1);
+      if (error) throw new Error(error.message);
+      return (data || []) as any;
+    }
     const sp = new URLSearchParams();
     if (params) Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') sp.append(k, String(v)); });
     return this.fetchWithError(`${API_BASE_URL}/documents?${sp.toString()}`);
