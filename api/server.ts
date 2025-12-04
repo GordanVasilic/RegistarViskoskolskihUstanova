@@ -1087,6 +1087,21 @@ app.post('/api/_setup/seed', async (req, res) => {
   }
 });
 
+// Health check
+app.get('/api/_health', async (req, res) => {
+  const hasUrl = !!SUPABASE_URL;
+  const hasKey = !!SUPABASE_KEY;
+  const sup = useSupabase;
+  let dbok = false;
+  if (useSupabase) {
+    try {
+      const { error } = await supabase!.from('institutions').select('*', { count: 'exact', head: true });
+      dbok = !error;
+    } catch { dbok = false; }
+  }
+  res.json({ useSupabase: sup, hasUrl, hasKey, dbok });
+});
+
 // Export current database as SQL (compatible with Supabase schema)
 app.get('/api/export/sql', (req, res) => {
   function esc(v: any) {
