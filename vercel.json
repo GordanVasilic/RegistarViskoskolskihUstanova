@@ -4,6 +4,10 @@
     { "src": "api/index.ts", "use": "@vercel/node" },
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
   ],
+  "functions": {
+    "api/[...path].ts": { "includeFiles": "html/**" },
+    "api/index.ts": { "includeFiles": "html/**" }
+  },
   "routes": [
     { "src": "/api/(.*)", "dest": "api/[...path].ts" },
     { "handle": "filesystem" },

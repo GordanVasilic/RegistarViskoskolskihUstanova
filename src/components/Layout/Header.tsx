@@ -11,7 +11,8 @@ const Header: React.FC = () => {
 
   const navigation = [
     { name: 'Registar', href: '/' },
-    { name: 'Uputstvo', href: '/uputstvo' }
+    { name: 'Uputstvo', href: '/uputstvo' },
+    { name: 'HTML stranice', href: '/html' }
   ];
 
   const adminMenuItems = [

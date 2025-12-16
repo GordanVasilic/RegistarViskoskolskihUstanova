@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
  
 
 const ROOT_DIR = process.cwd();
+const HTML_DIR = path.join(ROOT_DIR, 'html');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1252,8 +1253,42 @@ app.delete('/api/users/:id', (req, res) => {
     if (error) return res.status(500).json({ error: 'Failed to delete user' });
     const payload = diffObject(before, null);
     await supabase!.from('audit_logs').insert({ id: 'audit-' + Date.now(), actor_id: actorId, actor_role: actorRole, actor_name: null, action: 'delete', resource_type: 'user', resource_id: id, changed_fields: JSON.stringify(payload.changed), prev_values: JSON.stringify(payload.prevOut), new_values: null });
-    res.json({ ok: true });
-  })();
+  res.json({ ok: true });
+})();
+});
+
+app.get('/api/html/list', (req, res) => {
+  try {
+    const files: Array<{ name: string; href: string }> = [];
+    const walk = (dir: string, base: string = '') => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const rel = path.join(base, e.name);
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full, rel);
+        } else if (e.isFile() && e.name.toLowerCase().endsWith('.html')) {
+          const href = `/api/html/open?file=${encodeURIComponent(rel.replace(/\\/g, '/'))}`;
+          files.push({ name: rel.replace(/\\/g, '/'), href });
+        }
+      }
+    };
+    if (fs.existsSync(HTML_DIR)) walk(HTML_DIR);
+    res.json(files);
+  } catch {
+    res.status(500).json({ error: 'Failed to list HTML files' });
+  }
+});
+
+app.get('/api/html/open', (req, res) => {
+  const rel = String((req.query as any).file || '').trim();
+  if (!rel) return res.status(400).send('Missing file');
+  const safeRel = rel.replace(/^\.\/+/, '').replace(/^\//, '');
+  const abs = path.resolve(HTML_DIR, safeRel);
+  if (!abs.startsWith(path.resolve(HTML_DIR))) return res.status(400).send('Invalid path');
+  if (!fs.existsSync(abs)) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  fs.createReadStream(abs).pipe(res);
 });
 
 // Global error handler to always return JSON

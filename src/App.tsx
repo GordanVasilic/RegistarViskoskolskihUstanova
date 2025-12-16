@@ -7,6 +7,7 @@ import PublicRegistry from "@/pages/PublicRegistry";
 import AdminPanel from "@/pages/AdminPanel";
 import InstitutionPortal from "@/pages/InstitutionPortal";
 import Uputstvo from "@/pages/Uputstvo";
+import HtmlList from "@/pages/HtmlList";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route index element={<PublicRegistry />} />
           <Route path="registar" element={<PublicRegistry />} />
           <Route path="uputstvo" element={<Uputstvo />} />
+          <Route path="html" element={<HtmlList />} />
           <Route path="ustanova/:id" element={<InstitutionDetail />} />
           <Route path="admin" element={<AdminPanel />} />
           <Route path="portal" element={<InstitutionPortal />} />
