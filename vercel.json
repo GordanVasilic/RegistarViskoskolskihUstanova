@@ -1,12 +1,8 @@
 {
-  "builds": [
-    { "src": "api/[...path].ts", "use": "@vercel/node" },
-    { "src": "api/index.ts", "use": "@vercel/node" },
-    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
-  ],
   "functions": {
-    "api/[...path].ts": { "includeFiles": "public/html/**" },
-    "api/index.ts": { "includeFiles": "public/html/**" }
+    "api/**/*.ts": {
+      "includeFiles": "public/html/**"
+    }
   },
   "routes": [
     { "src": "/api/(.*)", "dest": "api/[...path].ts" },
