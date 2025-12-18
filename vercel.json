@@ -5,8 +5,8 @@
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
   ],
   "functions": {
-    "api/[...path].ts": { "includeFiles": "html/**" },
-    "api/index.ts": { "includeFiles": "html/**" }
+    "api/[...path].ts": { "includeFiles": "public/html/**" },
+    "api/index.ts": { "includeFiles": "public/html/**" }
   },
   "routes": [
     { "src": "/api/(.*)", "dest": "api/[...path].ts" },
